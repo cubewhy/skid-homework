@@ -21,31 +21,33 @@ function App() {
 
   return (
     <ThemeProvider defaultTheme="system" storageKey="theme">
-      <HashRouter>
-        <Routes>
-          <Route
-            path="/"
-            element={
-              <RequireAiKey fallback="/init">
-                <ScanPage />
-              </RequireAiKey>
-            }
-          />
+      <div className="safe-area">
+        <HashRouter>
+          <Routes>
+            <Route
+              path="/"
+              element={
+                <RequireAiKey fallback="/init">
+                  <ScanPage />
+                </RequireAiKey>
+              }
+            />
 
-          <Route
-            path="/chat"
-            element={
-              <RequireAiKey fallback="/init">
-                <ChatPage />
-              </RequireAiKey>
-            }
-          />
-          <Route path="/init" element={<InitPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-        </Routes>
-      </HashRouter>
+            <Route
+              path="/chat"
+              element={
+                <RequireAiKey fallback="/init">
+                  <ChatPage />
+                </RequireAiKey>
+              }
+            />
+            <Route path="/init" element={<InitPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+          </Routes>
+        </HashRouter>
 
-      <Toaster />
+        <Toaster />
+      </div>
     </ThemeProvider>
   );
 }

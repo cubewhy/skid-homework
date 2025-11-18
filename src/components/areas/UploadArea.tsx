@@ -14,6 +14,7 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { cn } from "@/lib/utils";
 import { useShortcut } from "@/hooks/use-shortcut";
 import { ShortcutHint } from "../ShortcutHint";
+import { useNativeCamera } from "@/hooks/use-native-camera";
 
 export type UploadAreaProps = {
   appendFiles: (files: File[] | FileList, source: FileItem["source"]) => void;
@@ -41,10 +42,22 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
     uploadInputRef.current?.click();
   }, [isWorking]);
 
-  const handleCameraBtnClicked = useCallback(() => {
+  const { isNative, capture } = useNativeCamera();
+  const runCameraFlow = useCallback(async () => {
     if (isWorking) return;
+    if (isNative) {
+      const files = await capture();
+      if (files.length) {
+        appendFiles(files, "camera");
+        return;
+      }
+    }
     cameraInputRef.current?.click();
-  }, [isWorking]);
+  }, [appendFiles, capture, isNative, isWorking]);
+
+  const handleCameraBtnClicked = useCallback(() => {
+    void runCameraFlow();
+  }, [runCameraFlow]);
 
   const uploadShortcut = useShortcut("upload", () => handleUploadBtnClicked(), [
     handleUploadBtnClicked,

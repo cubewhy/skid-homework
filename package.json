@@ -7,9 +7,15 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "cap:sync": "pnpm build && cap sync",
+    "cap:sync:android": "pnpm build && cap sync android",
+    "cap:open:android": "cap open android"
   },
   "dependencies": {
+    "@capacitor/camera": "^7.0.2",
+    "@capacitor/core": "^7.4.4",
+    "@emotion/is-prop-valid": "^1.4.0",
     "@google/genai": "^1.21.0",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
@@ -55,6 +61,8 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@capacitor/android": "^7.4.4",
+    "@capacitor/cli": "^7.4.4",
     "@eslint/js": "^9.36.0",
     "@types/node": "^24.5.2",
     "@types/react": "^19.1.13",

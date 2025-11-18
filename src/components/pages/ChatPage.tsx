@@ -796,13 +796,13 @@ export default function ChatPage() {
   );
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
+    <div className="flex min-h-screen flex-col bg-background overflow-x-hidden">
       {/* ===== HEADER ===== */}
       {/* BEST PRACTICE: Sticky header with backdrop blur for a modern feel. */}
       <header className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur">
         {/* MODIFICATION: Using max-w-7xl and mx-auto for a centered, responsive container. */}
-        <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
-          <div className="flex flex-1 items-center gap-3">
+        <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
+          <div className="flex flex-1 flex-wrap items-center gap-3">
             {/* BEST PRACTICE: This button is only visible on small screens (hidden on 'lg' and up) to trigger the mobile sidebar. */}
             <Button
               variant="outline"
@@ -837,7 +837,7 @@ export default function ChatPage() {
               </p>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2 flex-wrap justify-end w-full sm:w-auto">
             <Button variant="outline" size="sm" onClick={() => navigate("/")}>
               {t("actions.back")} <Kbd>ESC</Kbd>
             </Button>
