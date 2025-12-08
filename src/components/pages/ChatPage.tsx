@@ -797,7 +797,7 @@ export default function ChatPage() {
                   }}
                   placeholder={t("composer.placeholder")}
                   disabled={isSending || !resolvedSource}
-                  className="min-h-6 max-h-[200px] w-full resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 text-base"
+                  className="min-h-6 max-h-[200px] w-full resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 text-base"
                 />
                 <Button
                   size="icon"
