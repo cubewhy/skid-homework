@@ -12,6 +12,8 @@ lerna-debug.log*
 
 node_modules
 dist
+/.open-next
+/.wrangler
 /.next
 dist-ssr
 *.local
