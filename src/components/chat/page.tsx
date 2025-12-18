@@ -89,7 +89,7 @@ export default function ChatPage() {
                       <PanelLeftClose className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>Close Sidebar</TooltipContent>
+                  <TooltipContent>{t("actions.close-sidebar")}</TooltipContent>
                 </Tooltip>
               </div>
               <div className="flex-1 overflow-hidden">

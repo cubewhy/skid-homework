@@ -101,7 +101,10 @@
     "actions": {
       "back": "返回扫描页",
       "new-chat": "新对话",
-      "delete-chat": "删除对话"
+      "delete-chat": "删除对话",
+      "search": "搜索聊天...",
+      "close-sidebar": "关闭侧边栏",
+      "open-settings": "设置"
     },
     "source": {
       "section": "模型",
@@ -126,7 +129,8 @@
     "composer": {
       "placeholder": "输入问题或粘贴题目...",
       "send": "发送",
-      "sending": "发送中..."
+      "sending": "发送中...",
+      "aigc-disclaimer": "AI 会犯错, 请核对重要信息"
     },
     "errors": {
       "no-source": "请先在设置中启用至少一个已配置密钥的 AI 源。",

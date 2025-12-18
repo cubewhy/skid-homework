@@ -101,7 +101,10 @@
     "actions": {
       "back": "Back to Scanner",
       "new-chat": "New Chat",
-      "delete-chat": "Delete Chat"
+      "delete-chat": "Delete Chat",
+      "search": "Search chats...",
+      "close-sidebar": "Close Sidebar",
+      "open-settings": "Settings"
     },
     "source": {
       "section": "Model",
@@ -126,7 +129,8 @@
     "composer": {
       "placeholder": "Ask a question or paste a problem...",
       "send": "Send",
-      "sending": "Sending..."
+      "sending": "Sending...",
+      "aigc-disclaimer": "AI can make mistakes. Verify important information."
     },
     "errors": {
       "no-source": "Please enable at least one source with an API key in Settings.",

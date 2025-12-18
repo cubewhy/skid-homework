@@ -51,7 +51,7 @@ export function ChatSidebar({
   onDeleteChat,
   onCloseMobile,
 }: ChatSidebarProps) {
-  const { t } = useTranslation("commons", { keyPrefix: "chat-page" });
+  const { t } = useTranslation("commons", { keyPrefix: "chat-page.actions" });
 
   return (
     <div className="flex h-full flex-col gap-4">
@@ -62,7 +62,7 @@ export function ChatSidebar({
           variant="default"
         >
           <Plus className="h-4 w-4" />
-          {t("actions.new-chat")}
+          {t("new-chat")}
         </Button>
       </div>
 
@@ -70,7 +70,7 @@ export function ChatSidebar({
         <div className="relative">
           <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search chats..."
+            placeholder={t("search")}
             className="pl-8 h-9"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
@@ -156,7 +156,7 @@ export function ChatSidebar({
             className="w-full justify-start gap-2"
             size="sm"
           >
-            {t("actions.back")}
+            {t("back")}
             <Kbd>ESC</Kbd>
           </Button>
         </Link>

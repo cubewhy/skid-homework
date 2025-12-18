@@ -20,10 +20,14 @@ interface Resources {
     "chat-page": {
       "actions": {
         "back": "Back to Scanner",
+        "close-sidebar": "Close Sidebar",
         "delete-chat": "Delete Chat",
-        "new-chat": "New Chat"
+        "new-chat": "New Chat",
+        "open-settings": "Settings",
+        "search": "Search chats..."
       },
       "composer": {
+        "aigc-disclaimer": "AI can make mistakes. Verify important information.",
         "placeholder": "Ask a question or paste a problem...",
         "send": "Send",
         "sending": "Sending..."

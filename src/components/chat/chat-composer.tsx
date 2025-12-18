@@ -23,7 +23,7 @@ export function ChatComposer({
   isSending,
   disabled,
 }: ChatComposerProps) {
-  const { t } = useTranslation("commons", { keyPrefix: "chat-page" });
+  const { t } = useTranslation("commons", { keyPrefix: "chat-page.composer" });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -51,7 +51,7 @@ export function ChatComposer({
                 onSend();
               }
             }}
-            placeholder={t("composer.placeholder")}
+            placeholder={t("placeholder")}
             disabled={disabled || isSending}
             className="min-h-6 max-h-50 w-full resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 text-base"
           />
@@ -71,7 +71,7 @@ export function ChatComposer({
         </div>
         <div className="mt-2 text-center">
           <p className="text-[10px] text-muted-foreground/60">
-            AI can make mistakes. Verify important information.
+            {t("aigc-disclaimer")}
           </p>
         </div>
       </div>

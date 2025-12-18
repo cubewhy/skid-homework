@@ -180,7 +180,7 @@ export function ChatHeader({
             </Link>
           </TooltipTrigger>
           <TooltipContent>
-            {t("settings.title", { defaultValue: "Settings" })}
+            {t("actions.open-settings", { defaultValue: "Settings" })}
           </TooltipContent>
         </Tooltip>
       </div>
