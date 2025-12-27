@@ -1,14 +1,17 @@
 import { Button } from "@/components/ui/button";
 import { ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
+import CodeRenderer from "../CodeRenderer";
 
 export type DiagramRendererProps = {
   content: string;
+  language: string;
   children: ReactNode;
 };
 
 export default function DiagramRenderer({
   content,
+  language,
   children,
 }: DiagramRendererProps) {
   const { t } = useTranslation("commons", { keyPrefix: "md.diagram" });
@@ -26,9 +29,7 @@ export default function DiagramRenderer({
         </Button>
       </div>
       {isCodeView ? (
-        <pre>
-          <code>{content}</code>
-        </pre>
+        <CodeRenderer language={language} content={content} />
       ) : (
         children
       )}

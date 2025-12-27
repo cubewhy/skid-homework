@@ -16,6 +16,8 @@ import { TextShimmer } from "../ui/text-shimmer";
 import { useTranslation } from "react-i18next";
 import MermaidDiagram from "./diagram/MermaidDiagram";
 import DiagramRenderer from "./diagram/DiagramRenderer";
+import CodeRenderer from "./CodeRenderer";
+import { cn } from "@/lib/utils";
 
 type UnistPoint = {
   line: number;
@@ -78,6 +80,7 @@ const CodeBlock = ({
     }
 
     let component: ReactNode;
+    let realLanguage = "json";
 
     if (lang === "plot-function") {
       component = (
@@ -93,16 +96,25 @@ const CodeBlock = ({
 
     if (lang === "plot-mermaid") {
       component = <MermaidDiagram code={content} />;
+      realLanguage = "mermaid";
     }
 
-    return <DiagramRenderer content={content}>{component}</DiagramRenderer>;
+    return (
+      <DiagramRenderer language={realLanguage} content={content}>
+        {component}
+      </DiagramRenderer>
+    );
   }
 
-  return (
-    <code className={className} {...props}>
-      {children}
-    </code>
-  );
+  if (match) {
+    return <CodeRenderer language={lang} content={content} />;
+  } else {
+    return (
+      <code className={cn(className, "bg-accent p-0.5 rounded")} {...props}>
+        {children}
+      </code>
+    );
+  }
 };
 
 const components = {
