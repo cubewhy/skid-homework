@@ -53,7 +53,7 @@
     "toasts": {
       "post-processing": {
         "title": "Still processing...",
-        "description": "Your image was still post-processing. Please wait."
+        "description": "Your image was still post-processing. Please wait for a while."
       },
       "no-model": {
         "title": "Model required",
