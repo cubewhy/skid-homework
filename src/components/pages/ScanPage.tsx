@@ -46,7 +46,9 @@ export default function ScanPage() {
     clearStreamedOutput,
   } = useProblemsStore((s) => s);
 
-  const { imageBinarizing, traits } = useSettingsStore((s) => s);
+  const { imageEnhancement: imageBinarizing, traits } = useSettingsStore(
+    (s) => s,
+  );
   const imageBinarizingRef = useRef(imageBinarizing);
 
   // Zustand store for AI provider configuration.
@@ -148,7 +150,7 @@ export default function ScanPage() {
         source,
         status:
           file.type.startsWith("image/") && imageBinarizingRef.current
-            ? "rasterizing"
+            ? "processing"
             : "pending",
       }));
 
@@ -157,7 +159,7 @@ export default function ScanPage() {
       // Image post-processing
       if (imageBinarizingRef.current) {
         initialItems.forEach((item) => {
-          if (item.status === "rasterizing") {
+          if (item.status === "processing") {
             console.log(`Processing image ${item.file.name}`);
             processImage(item.file)
               .then((result) => {

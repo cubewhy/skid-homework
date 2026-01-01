@@ -397,7 +397,7 @@
       },
       "image-post-processing": {
         "title": "Image Post-processing",
-        "binarizing": "Enable binarizing"
+        "enhancement": "Enable Image Enhancement"
       },
       "ui": {
         "title": "UI",

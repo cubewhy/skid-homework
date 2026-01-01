@@ -286,7 +286,7 @@ interface Resources {
           "title": "Explanation Mode"
         },
         "image-post-processing": {
-          "binarizing": "Enable binarizing",
+          "enhancement": "Enable Image Enhancement",
           "title": "Image Post-processing"
         },
         "title": "Advanced Settings",

@@ -397,7 +397,7 @@
       },
       "image-post-processing": {
         "title": "图像后处理",
-        "binarizing": "开启二值化"
+        "enhancement": "开启二值化"
       },
       "ui": {
         "title": "界面",

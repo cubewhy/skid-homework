@@ -91,8 +91,8 @@ export default function SettingsPage() {
   const getClientForSource = useAiStore((s) => s.getClientForSource);
 
   const {
-    imageBinarizing,
-    setImageBinarizing,
+    imageEnhancement: imageEnhancement,
+    setImageEnhancement: setImageEnhancement,
     showQwenHint,
     setShowQwenHint,
     theme: themePreference,
@@ -114,17 +114,14 @@ export default function SettingsPage() {
   );
   useQwenHintAutoToggle(sources, showQwenHint, setShowQwenHint);
 
-  const [localTraits, setLocalTraits] = useState(activeSource?.traits ?? "");
-  const [localThinkingBudget, setLocalThinkingBudget] = useState(
-    activeSource?.thinkingBudget ?? 8192,
+  const localTraits = useMemo(() => activeSource?.traits ?? "", [activeSource]);
+  const localThinkingBudget = useMemo(
+    () => activeSource?.thinkingBudget ?? 8192,
+    [activeSource],
   );
+
   const [availableModels, setAvailableModels] = useState<AiModelSummary[]>([]);
   const [modelPopoverOpen, setModelPopoverOpen] = useState(false);
-
-  useEffect(() => {
-    setLocalTraits(activeSource?.traits ?? "");
-    setLocalThinkingBudget(activeSource?.thinkingBudget ?? 8192);
-  }, [activeSource]);
 
   const router = useRouter();
   const handleBack = useCallback(() => {
@@ -283,19 +280,16 @@ export default function SettingsPage() {
 
   const handleTraitsChange = (value: string) => {
     if (!activeSource) return;
-    setLocalTraits(value);
     updateSource(activeSource.id, { traits: value || undefined });
   };
 
   const clearTraits = () => {
     if (!activeSource) return;
-    setLocalTraits("");
     updateSource(activeSource.id, { traits: undefined });
   };
 
   const handleThinkingBudgetChange = (value: number) => {
     if (!activeSource) return;
-    setLocalThinkingBudget(value);
     updateSource(activeSource.id, { thinkingBudget: value });
   };
 
@@ -528,7 +522,7 @@ export default function SettingsPage() {
               <div className="relative">
                 <Textarea
                   id="traits-input"
-                  className="min-h-[100px] pr-20"
+                  className="min-h-25 pr-20"
                   value={localTraits}
                   onChange={(event) => handleTraitsChange(event.target.value)}
                   placeholder={t("traits.placeholder")}
@@ -558,14 +552,14 @@ export default function SettingsPage() {
           <CardContent className="flex flex-col gap-3">
             <div className="flex items-center gap-3">
               <Checkbox
-                id="image-binarizing"
-                checked={imageBinarizing}
+                id="image-enhancement"
+                checked={imageEnhancement}
                 onCheckedChange={(state) =>
-                  setImageBinarizing(state as boolean)
+                  setImageEnhancement(state as boolean)
                 }
               />
-              <Label htmlFor="image-binarizing">
-                {t("advanced.image-post-processing.binarizing")}
+              <Label htmlFor="image-enhancement">
+                {t("advanced.image-post-processing.enhancement")}
               </Label>
             </div>
 

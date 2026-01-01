@@ -34,8 +34,8 @@ const DISABLE_QWEN_HINT_DEFAULT =
 export const SHOULD_SHOW_QWEN_HINT_DEFAULT = !DISABLE_QWEN_HINT_DEFAULT;
 
 export interface SettingsState {
-  imageBinarizing: boolean;
-  setImageBinarizing: (imagePostprocessing: boolean) => void;
+  imageEnhancement: boolean;
+  setImageEnhancement: (imagePostprocessing: boolean) => void;
 
   showQwenHint: boolean;
   setShowQwenHint: (show: boolean) => void;
@@ -65,7 +65,7 @@ export interface SettingsState {
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
-      imageBinarizing: false,
+      imageEnhancement: false,
       showQwenHint: SHOULD_SHOW_QWEN_HINT_DEFAULT,
       theme: "system",
       language: DEFAULT_LANGUAGE,
@@ -75,7 +75,7 @@ export const useSettingsStore = create<SettingsState>()(
       explanationMode: "explanation",
       devtoolsEnabled: false,
 
-      setImageBinarizing: (state) => set({ imageBinarizing: state }),
+      setImageEnhancement: (state) => set({ imageEnhancement: state }),
       setShowQwenHint: (state) => set({ showQwenHint: state }),
       setThemePreference: (theme) => set({ theme }),
       setLanguage: (language) =>
@@ -112,7 +112,7 @@ export const useSettingsStore = create<SettingsState>()(
       name: "skidhw-storage",
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
-        imageBinarizing: state.imageBinarizing,
+        imageEnhancement: state.imageEnhancement,
         showQwenHint: state.showQwenHint,
         theme: state.theme,
         language: state.language,

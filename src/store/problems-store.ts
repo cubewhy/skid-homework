@@ -2,6 +2,8 @@ import { create } from "zustand";
 
 // --- TYPE DEFINITIONS ---
 
+export type FileStatus = "success" | "pending" | "failed" | "processing";
+
 // Type definition for an image item in the upload list.
 export type FileItem = {
   id: string; // Unique identifier for each item
@@ -9,7 +11,7 @@ export type FileItem = {
   mimeType: string;
   url: string; // Object URL for client-side preview
   source: "upload" | "camera"; // Origin of the image
-  status: "success" | "pending" | "failed" | "rasterizing";
+  status: FileStatus;
 };
 
 // Type definition for the solution set of a single image.

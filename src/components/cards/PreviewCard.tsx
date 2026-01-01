@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 import "react-photo-view/dist/react-photo-view.css";
 import { ImageIcon, Trash2, X } from "lucide-react";
 import { PhotoProvider, PhotoView } from "react-photo-view";
@@ -5,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { ScrollArea } from "../ui/scroll-area";
 import { Badge } from "../ui/badge";
 import { twMerge } from "tailwind-merge";
-import type { FileItem } from "@/store/problems-store";
+import type { FileItem, FileStatus } from "@/store/problems-store";
 import { useCallback, useState, type ClipboardEvent } from "react";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
@@ -17,9 +18,7 @@ export type PreviewCardProps = {
   layout?: "default" | "mobile";
 };
 
-function getColorClassByStatus(
-  status: "success" | "failed" | "pending" | "rasterizing",
-) {
+function getColorClassByStatus(status: FileStatus) {
   switch (status) {
     case "success":
       return "border-green-500";
@@ -27,7 +26,7 @@ function getColorClassByStatus(
       return "border-red-500";
     case "pending":
       return "border-amber-500";
-    case "rasterizing":
+    case "processing":
       return "border-cyan-500";
   }
 }
