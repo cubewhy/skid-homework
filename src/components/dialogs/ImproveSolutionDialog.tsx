@@ -7,11 +7,14 @@ import { parseImproveResponse, type ImproveResponse } from "@/ai/response";
 import { useAiStore } from "@/store/ai-store";
 import { forwardRef, useImperativeHandle, useMemo, useState } from "react";
 import { renderImproveXml } from "@/ai/request";
-import { IMPROVE_SYSTEM_PROMPT } from "@/ai/prompts/global";
 import { uint8ToBase64 } from "@/utils/encoding";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { TextInputDialog } from "./TextInputDialog";
+
+import improvePrompt from "../../ai/prompts/improve.prompt.md";
+import diagramToolPrompt from "@/ai/prompts/tools/diagram-tool.prompt.md";
+import mermaidToolPrompt from "@/ai/prompts/tools/mermaid-tool.prompt.md";
 
 export type ImproveSolutionDialogProps = {
   entry: OrderedSolution;
@@ -99,7 +102,10 @@ ${source.traits}
 `
           : "";
 
-        ai.setSystemPrompt(IMPROVE_SYSTEM_PROMPT + traitsPrompt);
+        ai.addSystemPrompt(improvePrompt);
+        ai.addSystemPrompt(traitsPrompt);
+
+        ai.setAvailableTools([diagramToolPrompt, mermaidToolPrompt]);
 
         try {
           clearStreamedOutput(entry.item.url);

@@ -10,7 +10,10 @@ import { decodeSeedChat, type SeedChatState } from "@/lib/chat-seed";
 import { useAiStore, type AiSource } from "@/store/ai-store";
 import { useChatStore } from "@/store/chat-store";
 import type { AiChatMessage } from "@/ai/chat-types";
-import { BASE_CHAT_SYSTEM_PROMPT } from "@/ai/prompts/global";
+
+import chatPrompt from "@/ai/prompts/chat.prompt.md";
+import diagramToolPrompt from "@/ai/prompts/tools/diagram-tool.prompt.md";
+import mermaidToolPrompt from "@/ai/prompts/tools/mermaid-tool.prompt.md";
 
 function trimTitle(text: string, fallback: string) {
   const trimmed = text.replace(/\s+/g, " ").trim();
@@ -281,7 +284,10 @@ export function useChatLogic() {
       const traitsPrompt = resolvedSource.traits
         ? `\nUser traits:\n${resolvedSource.traits}\n`
         : "";
-      client.setSystemPrompt(BASE_CHAT_SYSTEM_PROMPT + traitsPrompt);
+      client.addSystemPrompt(chatPrompt);
+      client.addSystemPrompt(traitsPrompt);
+
+      client.setAvailableTools([diagramToolPrompt, mermaidToolPrompt]);
 
       let aggregated = "";
       await client.sendChat(

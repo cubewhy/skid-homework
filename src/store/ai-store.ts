@@ -33,7 +33,8 @@ export type ImportAISourceModel = {
 };
 
 export interface AiClient {
-  setSystemPrompt: (prompt: string) => void;
+  setAvailableTools: (prompts: string[]) => void;
+  addSystemPrompt: (prompt: string) => void;
   sendMedia: (
     media: string,
     mimeType: string,

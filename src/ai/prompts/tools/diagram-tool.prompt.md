@@ -1,20 +1,21 @@
-export const DIAGRAM_TOOL_PROMPT = `
-## Math Graph Tool (\`plot-function\`)
+## Math Graph Tool (`plot-function`)
 
-Use this tool to render 2D mathematical graphs, geometry, and statistical plots using the \`function-plot\` library.
+Use this tool to render 2D mathematical graphs, geometry, and statistical plots using the `function-plot` library.
 
 ### 1. Trigger Syntax
-To render a graph, output a code block with the language tag \`plot-function\` containing a valid JSON object.
 
-### 2. Core Concepts: \`domain\` vs. \`range\`
-It is critical to understand the difference between the axis \`domain\` and the data \`range\`:
+To render a graph, output a code block with the language tag `plot-function` containing a valid JSON object.
 
--   **\`xAxis.domain\`**: Controls the visible area of the entire chart. Think of it as the "camera view" or the boundaries of the graph paper. It affects all plotted data.
--   **\`data.range\`**: This is an optional property **inside a data object**. It limits or "clips" the drawing of that *specific function*. The function's line will only be drawn within this interval, and the rest of the graph will be blank.
+### 2. Core Concepts: `domain` vs. `range`
+
+It is critical to understand the difference between the axis `domain` and the data `range`:
+
+- **`xAxis.domain`**: Controls the visible area of the entire chart. Think of it as the "camera view" or the boundaries of the graph paper. It affects all plotted data.
+- **`data.range`**: This is an optional property **inside a data object**. It limits or "clips" the drawing of that _specific function_. The function's line will only be drawn within this interval, and the rest of the graph will be blank.
 
 ### 3. JSON Configuration Schema
 
-\`\`\`plot-function
+```plot-function
 {
   "title": "Optional Chart Title",
   "xAxis": {
@@ -68,21 +69,24 @@ It is critical to understand the difference between the axis \`domain\` and the 
     }
   ]
 }
-\`\`\`
+```
 
 ### 4. Critical Rules
-1.  **Use \`range\` to Limit Functions**: To draw only a segment of a function (e.g., \`sin(x)\` from 0 to π), you MUST use the \`range\` property inside its \`data\` object. For best results, set \`xAxis.domain\` to a similar or slightly larger interval to frame the segment properly.
+
+1.  **Use `range` to Limit Functions**: To draw only a segment of a function (e.g., `sin(x)` from 0 to π), you MUST use the `range` property inside its `data` object. For best results, set `xAxis.domain` to a similar or slightly larger interval to frame the segment properly.
 2.  **NO Arithmetic in JSON**: You must pre-calculate all numbers before outputting the JSON.
-    *   ❌ \`"domain": [-2*PI, 2*PI]\`
-    *   ✅ \`"domain": [-6.28, 6.28]\`
+    - ❌ `"domain": [-2*PI, 2*PI]`
+    - ✅ `"domain": [-6.28, 6.28]`
 3.  **Valid JSON**: Your output must be perfectly valid JSON. No trailing commas, no comments, and use double quotes for all keys and string values.
-4.  **Functions**: Use standard math syntax (e.g., \`sin(x)\`, \`exp(x)\`, \`x^2\`, \`sqrt(x)\`).
+4.  **Functions**: Use standard math syntax (e.g., `sin(x)`, `exp(x)`, `x^2`, `sqrt(x)`).
 
 ### 5. Examples
 
 #### Example 1: Plotting a Segment of a Sine Wave
-To plot \`sin(x)\` only from 0 to 2π:
-\`\`\`plot-function
+
+To plot `sin(x)` only from 0 to 2π:
+
+```plot-function
 {
   "title": "Segment of sin(x)",
   "xAxis": {
@@ -102,10 +106,11 @@ To plot \`sin(x)\` only from 0 to 2π:
     }
   ]
 }
-\`\`\`
+```
 
 #### Example 2: Calculus (Area under a curve)
-\`\`\`plot-function
+
+```plot-function
 {
   "title": "Integration of cos(x)",
   "xAxis": { "domain": [-2, 2] },
@@ -124,10 +129,11 @@ To plot \`sin(x)\` only from 0 to 2π:
     }
   ]
 }
-\`\`\`
+```
 
 #### Example 3: Linear Algebra (Vectors)
-\`\`\`plot-function
+
+```plot-function
 {
   "title": "Vector Addition",
   "xAxis": { "domain": [0, 5] },
@@ -139,5 +145,4 @@ To plot \`sin(x)\` only from 0 to 2π:
     { "vector": [3, 4], "label": "v1+v2", "color": "purple", "fnType": "vector" }
   ]
 }
-\`\`\`
-`;
+```

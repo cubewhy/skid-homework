@@ -16,7 +16,7 @@ export interface GeminiConfig {
 
 export class GeminiAi {
   private ai: GoogleGenAI;
-  private systemPrompt?: string;
+  private systemPrompts: string[];
   private config: GeminiConfig;
 
   constructor(key: string, baseUrl?: string, config?: GeminiConfig) {
@@ -26,6 +26,8 @@ export class GeminiAi {
         baseUrl: baseUrl,
       },
     });
+
+    this.systemPrompts = [];
 
     this.config = {
       thinkingBudget: config?.thinkingBudget ?? -1,
@@ -50,42 +52,15 @@ export class GeminiAi {
     };
   }
 
-  setSystemPrompt(prompt: string) {
-    this.systemPrompt = prompt;
+  addSystemPrompt(prompt: string) {
+    this.systemPrompts?.push(prompt);
   }
 
-  // async sendText(userText: string, model = "gemini-2.5-pro") {
-  //   const contents = [];
-  //
-  //   if (this.systemPrompt) {
-  //     contents.push({
-  //       role: "user",
-  //       parts: [{ text: this.systemPrompt }],
-  //     });
-  //   }
-  //
-  //   contents.push({
-  //     role: "user",
-  //     parts: [{ text: userText }],
-  //   });
-  //
-  //   const response = await this.ai.models.generateContentStream({
-  //     model,
-  //     config: {
-  //       thinkingConfig: { thinkingBudget: this.config.thinkingBudget },
-  //       safetySettings: this.config.safetySettings,
-  //     },
-  //     contents,
-  //   });
-  //
-  //   let result = "";
-  //   for await (const chunk of response) {
-  //     if (chunk.text) {
-  //       result += chunk.text;
-  //     }
-  //   }
-  //   return result;
-  // }
+  setAvailableTools(prompts: string[]) {
+    const toolsPrompt = prompts.join("\n\n");
+    this.addSystemPrompt(`## Available Tools\n${toolsPrompt}`);
+    // TODO: join prompt when invoke send* methods
+  }
 
   async sendMedia(
     media: string,
@@ -96,10 +71,10 @@ export class GeminiAi {
   ) {
     const contents = [];
 
-    if (this.systemPrompt) {
+    if (this.systemPrompts) {
       contents.push({
         role: "user",
-        parts: [{ text: this.systemPrompt }],
+        parts: [{ text: this.systemPrompts.join("\n\n") }],
       });
     }
 
@@ -164,12 +139,19 @@ export class GeminiAi {
   ) {
     const contents = [];
 
-    if (this.systemPrompt) {
+    if (this.systemPrompts) {
       contents.push({
         role: "user",
-        parts: [{ text: this.systemPrompt }],
+        parts: [{ text: this.systemPrompts.join("\n\n") }],
       });
     }
+
+    console.log(
+      `AI Query with ${model}\nSystem prompt:`,
+      this.systemPrompts,
+      "\nUser query:",
+      messages,
+    );
 
     for (const message of messages) {
       const trimmed = message.content?.trim();

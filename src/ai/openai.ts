@@ -16,7 +16,7 @@ function normalizeBaseUrl(baseUrl?: string) {
 
 export class OpenAiClient {
   private client: OpenAI;
-  private systemPrompt?: string;
+  private systemPrompts: string[];
 
   constructor(apiKey: string, baseUrl?: string) {
     this.client = new OpenAI({
@@ -24,10 +24,17 @@ export class OpenAiClient {
       baseURL: normalizeBaseUrl(baseUrl),
       dangerouslyAllowBrowser: true,
     });
+    this.systemPrompts = [];
   }
 
-  setSystemPrompt(prompt: string) {
-    this.systemPrompt = prompt;
+  addSystemPrompt(prompt: string) {
+    this.systemPrompts?.push(prompt);
+  }
+
+  setAvailableTools(prompts: string[]) {
+    const toolsPrompt = prompts.join("\n\n");
+    this.addSystemPrompt(`## Available Tools\n${toolsPrompt}`);
+    // TODO: join prompt when invoke send* methods
   }
 
   /**
@@ -43,10 +50,10 @@ export class OpenAiClient {
     const messages: ChatCompletionMessageParam[] = [];
 
     // 1. Add System Prompt
-    if (this.systemPrompt) {
+    if (this.systemPrompts) {
       messages.push({
         role: "system",
-        content: this.systemPrompt,
+        content: this.systemPrompts.join("\n\n"),
       });
     }
 
@@ -93,12 +100,19 @@ export class OpenAiClient {
     const openAiMessages: ChatCompletionMessageParam[] = [];
 
     // 1. Add System Prompt
-    if (this.systemPrompt) {
-      openAiMessages.push({
+    if (this.systemPrompts) {
+      messages.push({
         role: "system",
-        content: this.systemPrompt,
+        content: this.systemPrompts.join("\n\n"),
       });
     }
+
+    console.log(
+      `AI Query with ${model}\nSystem prompt:`,
+      this.systemPrompts,
+      "\nUser query:",
+      messages,
+    );
 
     // 2. Convert History
     for (const message of messages) {
