@@ -256,8 +256,12 @@ export default function SolutionViewer({
                   {t("online-search.title")}
                 </div>
                 <div className="rounded-lg bg-slate-900/60 p-3 text-sm">
-                  {activeProblem.onlineSearch ||
-                    t("online-search.placeholder")}
+                  <MemoizedMarkdown
+                    source={
+                      activeProblem.onlineSearch ||
+                      t("online-search.placeholder")
+                    }
+                  />
                 </div>
               </div>
             )}

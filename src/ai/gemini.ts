@@ -62,6 +62,35 @@ export class GeminiAi {
     // TODO: join prompt when invoke send* methods
   }
 
+  private static injectCitations(
+    text: string,
+    supports: {
+      segment: { startIndex?: number; endIndex?: number };
+      groundingChunkIndices: number[];
+    }[],
+  ): string {
+    const sorted = [...supports].sort(
+      (a, b) => (b.segment.endIndex ?? 0) - (a.segment.endIndex ?? 0),
+    );
+
+    let result = text;
+    for (const support of sorted) {
+      const { segment, groundingChunkIndices } = support;
+      if (segment.endIndex === undefined || !groundingChunkIndices.length)
+        continue;
+
+      const validIndices = groundingChunkIndices.map((i) => i + 1);
+      if (!validIndices.length) continue;
+
+      const citation = ` [${validIndices.join(",")}]`;
+      const idx = segment.endIndex;
+      if (idx <= result.length) {
+        result = result.slice(0, idx) + citation + result.slice(idx);
+      }
+    }
+    return result;
+  }
+
   private static formatOnlineSearch(
     groundingChunks: { uri?: string | null; title?: string | null }[],
     queries: string[],
@@ -88,7 +117,7 @@ export class GeminiAi {
       const title = c.title || c.uri || "result";
       const uri = c.uri ?? "";
       const link = uri ? `[${title}](${uri})` : title;
-      return `#${idx + 1} - ${link}`;
+      return `\\#${idx + 1} - ${link}  `;
     });
 
     const queryLine =
@@ -155,6 +184,10 @@ export class GeminiAi {
 
     const groundingChunks: { uri?: string | null; title?: string | null }[] =
       [];
+    const groundingSupports: {
+      segment: { startIndex?: number; endIndex?: number };
+      groundingChunkIndices: number[];
+    }[] = [];
     let webSearchQueries: string[] = [];
 
     const response = await this.ai.models.generateContentStream({
@@ -181,6 +214,10 @@ export class GeminiAi {
           }),
         );
       }
+      if (gm?.groundingSupports) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        gm.groundingSupports.forEach((gs: any) => groundingSupports.push(gs));
+      }
       if (gm?.webSearchQueries) {
         webSearchQueries = gm.webSearchQueries as string[];
       }
@@ -190,10 +227,14 @@ export class GeminiAi {
         callback?.(chunk.text);
       }
     }
+    const textWithCitations = GeminiAi.injectCitations(
+      result,
+      groundingSupports,
+    );
     return GeminiAi.formatOnlineSearch(
       groundingChunks,
       webSearchQueries,
-      result,
+      textWithCitations,
     );
   }
 
@@ -243,6 +284,10 @@ export class GeminiAi {
 
     const groundingChunks: { uri?: string | null; title?: string | null }[] =
       [];
+    const groundingSupports: {
+      segment: { startIndex?: number; endIndex?: number };
+      groundingChunkIndices: number[];
+    }[] = [];
     let webSearchQueries: string[] = [];
 
     const response = await this.ai.models.generateContentStream({
@@ -269,6 +314,10 @@ export class GeminiAi {
           }),
         );
       }
+      if (gm?.groundingSupports) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        gm.groundingSupports.forEach((gs: any) => groundingSupports.push(gs));
+      }
       if (gm?.webSearchQueries) {
         webSearchQueries = gm.webSearchQueries as string[];
       }
@@ -278,10 +327,14 @@ export class GeminiAi {
         callback?.(chunk.text);
       }
     }
+    const textWithCitations = GeminiAi.injectCitations(
+      result,
+      groundingSupports,
+    );
     return GeminiAi.formatOnlineSearch(
       groundingChunks,
       webSearchQueries,
-      result,
+      textWithCitations,
     ).trim();
   }
 }

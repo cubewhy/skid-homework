@@ -146,14 +146,25 @@ export function parseSolveResponse(response: string): SolveResponse {
     );
     const onlineSearch = hasOnlineSearch ? sections["ONLINE_SEARCH"] : undefined;
 
-    if (problemText || explanation || answer) {
+    if (problemText || explanation || answer || onlineSearch) {
       problems.push({
-        problem: problemText,
-        explanation: explanation,
-        answer: answer,
+        problem: problemText || (onlineSearch ? "Online Search Results" : ""),
+        explanation:
+          explanation || (onlineSearch ? "See search results below." : ""),
+        answer: answer || "",
         // Parse steps specifically from the explanation text
         steps: MarkdownSectionParser.parseSteps(explanation),
         onlineSearch,
+      });
+    } else if (chunk.trim()) {
+      // Fallback: If the chunk has content but no headers (and no online search section found via headers)
+      // We treat the whole chunk as the explanation.
+      problems.push({
+        problem: "Parsed Content",
+        explanation: chunk.trim(),
+        answer: "",
+        steps: MarkdownSectionParser.parseSteps(chunk.trim()),
+        onlineSearch: undefined,
       });
     }
   }

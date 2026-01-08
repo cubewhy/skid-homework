@@ -99,6 +99,10 @@ export default function SettingsPage() {
     setShowQwenHint,
     onlineSearchEnabled,
     setOnlineSearchEnabled,
+    showModelSelectorInScanner,
+    setShowModelSelectorInScanner,
+    showOnlineSearchInScanner,
+    setShowOnlineSearchInScanner,
     theme: themePreference,
     setThemePreference,
     language,
@@ -474,6 +478,20 @@ export default function SettingsPage() {
               </Button>
             </div>
             <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <Checkbox
+                  id="show-model-selector"
+                  checked={showModelSelectorInScanner}
+                  onCheckedChange={(state) =>
+                    setShowModelSelectorInScanner(Boolean(state))
+                  }
+                />
+                <Label htmlFor="show-model-selector">
+                  {t("model.show-selector-in-scanner")}
+                </Label>
+              </div>
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="model-manual">{t("model.manual.title")}</Label>
               <Input
                 id="model-manual"
@@ -552,6 +570,21 @@ export default function SettingsPage() {
                     {t("thinking.online-search.desc")}
                   </p>
                 </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <Checkbox
+                  id="show-online-search-scanner"
+                  checked={showOnlineSearchInScanner}
+                  onCheckedChange={(state) =>
+                    setShowOnlineSearchInScanner(Boolean(state))
+                  }
+                />
+                <Label htmlFor="show-online-search-scanner">
+                  {t("thinking.online-search.show-toggle-in-scanner")}
+                </Label>
               </div>
             </div>
 

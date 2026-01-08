@@ -378,6 +378,7 @@
         "none": "No model selected",
         "unknown": "Unknown model ({{name}})"
       },
+      "show-selector-in-scanner": "Show model selector in scanner",
       "refresh": "Refresh models",
       "manual": {
         "title": "Custom model",
@@ -392,11 +393,12 @@
       "title": "Thinking Settings",
       "desc": "Adjust advanced thinking parameters for supported providers.",
       "budget": "Thinking budget",
-      "tokens-unit": "tokens"
-      ,"online-search": {
+      "tokens-unit": "tokens",
+      "online-search": {
         "title": "Online search",
         "toggle": "Enable online search",
-        "desc": "Allow the assistant to call web search tools when needed."
+        "desc": "Allow the assistant to call web search tools when needed.",
+        "show-toggle-in-scanner": "Show online search toggle in scanner"
       }
     },
     "traits": {

@@ -235,11 +235,18 @@ export default function SolutionsArea() {
           ),
         );
         lines.push("");
+
+        if (problem.onlineSearch) {
+          lines.push(`**${tCommon("solution-viewer.online-search.title")}**`);
+          lines.push("");
+          lines.push(problem.onlineSearch);
+          lines.push("");
+        }
       });
     });
 
     return lines.join("\n");
-  }, [exportableSolutions, t, translate]);
+  }, [exportableSolutions, t, translate, tCommon]);
 
   const handleExportMarkdown = useCallback(() => {
     if (!exportableSolutions.length) {

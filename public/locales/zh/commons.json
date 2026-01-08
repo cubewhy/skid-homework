@@ -374,6 +374,7 @@
         "none": "未选择模型",
         "unknown": "未知模型（{{name}}）"
       },
+      "show-selector-in-scanner": "在扫描界面显示模型选择以快速切换模型",
       "refresh": "刷新模型列表",
       "manual": {
         "title": "自定义模型",
@@ -388,11 +389,12 @@
       "title": "思考参数",
       "desc": "针对支持的提供商调整高级思考设置。",
       "budget": "可用思考预算",
-      "tokens-unit": "Tokens"
-      ,"online-search": {
+      "tokens-unit": "Tokens",
+      "online-search": {
         "title": "联网搜索",
         "toggle": "启用联网搜索",
-        "desc": "在需要时允许助手调用联网搜索工具。"
+        "desc": "在需要时允许助手调用联网搜索工具。",
+        "show-toggle-in-scanner": "在扫描界面显示联网搜索按钮以快速切换"
       }
     },
     "traits": {

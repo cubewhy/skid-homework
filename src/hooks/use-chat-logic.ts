@@ -292,7 +292,7 @@ export function useChatLogic() {
       client.setAvailableTools([diagramToolPrompt, mermaidToolPrompt]);
 
       let aggregated = "";
-      await client.sendChat(
+      const finalContent = await client.sendChat(
         [...contextMessages, ...history],
         modelName,
         (delta) => {
@@ -304,7 +304,11 @@ export function useChatLogic() {
         { onlineSearch: onlineSearchEnabled },
       );
 
-      if (aggregated.trim()) {
+      if (finalContent && finalContent.trim()) {
+        await updateMessage(chatId!, assistantMessageId, {
+          content: finalContent.trim(),
+        });
+      } else if (aggregated.trim()) {
         await updateMessage(chatId!, assistantMessageId, {
           content: aggregated.trim(),
         });
