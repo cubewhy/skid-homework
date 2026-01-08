@@ -10,7 +10,7 @@ export type FileItem = {
   file: File; // The actual image file
   mimeType: string;
   url: string; // Object URL for client-side preview
-  source: "upload" | "camera"; // Origin of the image
+  source: "upload" | "camera" | "adb"; // Origin of the image
   status: FileStatus;
 };
 

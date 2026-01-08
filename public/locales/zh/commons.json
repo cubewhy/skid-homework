@@ -209,7 +209,13 @@
       ],
       "close": "知道了"
     },
-    "pdf-disabled": "仅在启用 Gemini 源时支持 PDF 上传。"
+    "pdf-disabled": "仅在启用 Gemini 源时支持 PDF 上传。",
+    "adb-connect": "ADB 连接",
+    "adb-reconnect": "重新连接 ADB",
+    "adb-screenshot": "ADB 截图",
+    "adb-connecting": "连接中...",
+    "adb-screenshot-busy": "采集中...",
+    "adb-screenshot-hint": "通过 ADB（WebUSB）从已连接的安卓设备捕获屏幕截图"
   },
   "uploads-info": {
     "selected": "已选择"
@@ -267,7 +273,7 @@
         "success": "已添加 {{name}}。",
         "key": "API 密钥",
         "key-placeholder": "abcdef",
-        "address": "API 地址 (可选)"
+        "address": "API 地址 ( 可选 )"
       },
       "make-active": "设为当前配置",
       "remove": {
@@ -324,6 +330,10 @@
         "camera": {
           "label": "拍照",
           "description": "调用设备相机拍摄作业。"
+        },
+        "adbScreenshot": {
+          "label": "ADB 截图",
+          "description": "通过 ADB 直接截取已连接安卓设备的屏幕。"
         },
         "startScan": {
           "label": "开始识别",
@@ -586,6 +596,7 @@
   },
   "sources": {
     "upload": "本地上传",
-    "camera": "拍摄"
+    "camera": "拍摄",
+    "adb": "ADB"
   }
 }

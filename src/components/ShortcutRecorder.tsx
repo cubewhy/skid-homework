@@ -28,13 +28,23 @@ export default function ShortcutRecorder({
   useEffect(() => {
     if (!recording) return;
 
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Block global shortcuts (including Settings page ESC) while recording.
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (event.key === "Escape") {
+        onChange("");
+        setRecording(false);
+      }
+    };
+
     const handleKeyUp = (event: KeyboardEvent) => {
       event.preventDefault();
       event.stopPropagation();
 
       if (event.key === "Escape") {
-        setRecording(false);
-        return;
+        return; // handled on keydown
       }
 
       const combo = buildShortcutFromKeyboardEvent(event);
@@ -45,9 +55,12 @@ export default function ShortcutRecorder({
       setRecording(false);
     };
 
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
     window.addEventListener("keyup", handleKeyUp, { capture: true });
-    return () =>
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, { capture: true });
       window.removeEventListener("keyup", handleKeyUp, { capture: true });
+    };
   }, [recording, onChange]);
 
   // useEffect(() => {

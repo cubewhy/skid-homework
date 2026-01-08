@@ -6,6 +6,7 @@ export type LanguagePreference = "en" | "zh";
 export type ShortcutAction =
   | "upload"
   | "camera"
+  | "adbScreenshot"
   | "startScan"
   | "clearAll"
   | "openSettings"
@@ -22,6 +23,7 @@ const DEFAULT_SHORTCUTS: ShortcutMap = {
   startScan: "ctrl+3",
   clearAll: "ctrl+4",
   openSettings: "ctrl+5",
+  adbScreenshot: "ctrl+6",
   openChat: "ctrl+e",
   openGlobalTraitsEditor: "ctrl+x",
 };
@@ -122,7 +124,7 @@ export const useSettingsStore = create<SettingsState>()(
         explanationMode: state.explanationMode,
         devtools: state.devtoolsEnabled,
       }),
-      version: 5,
+      version: 6,
       migrate: (persistedState, version) => {
         const data: Partial<SettingsState> & Record<string, unknown> =
           persistedState && typeof persistedState === "object"
