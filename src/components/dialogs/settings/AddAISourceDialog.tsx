@@ -13,6 +13,8 @@ import {
   DEFAULT_GEMINI_MODEL,
   DEFAULT_OPENAI_BASE_URL,
   DEFAULT_OPENAI_MODEL,
+  DEFAULT_OPENROUTER_BASE_URL,
+  DEFAULT_OPENROUTER_MODEL,
   useAiStore,
   type AiProvider,
 } from "@/store/ai-store";
@@ -56,24 +58,42 @@ export default function AddAISourceDialog({
     const provider = newProvider;
     const counter =
       sources.filter((source) => source.provider === provider).length + 1;
-    const defaultName =
-      provider === "gemini"
-        ? t("sources.providers.gemini") + ` #${counter}`
-        : t("sources.providers.openai") + ` #${counter}`;
+    
+    let defaultName = "";
+    if (provider === "gemini") {
+      defaultName = t("sources.providers.gemini") + ` #${counter}`;
+    } else if (provider === "openai") {
+      defaultName = t("sources.providers.openai") + ` #${counter}`;
+    } else {
+      defaultName = t("sources.providers.openrouter") + ` #${counter}`;
+    }
 
     const name = newSourceName.trim() || defaultName;
+
+    let defaultBaseUrl = "";
+    if (provider === "gemini") {
+      defaultBaseUrl = DEFAULT_GEMINI_BASE_URL;
+    } else if (provider === "openai") {
+      defaultBaseUrl = DEFAULT_OPENAI_BASE_URL;
+    } else {
+      defaultBaseUrl = DEFAULT_OPENROUTER_BASE_URL;
+    }
+
+    let defaultModel = "";
+    if (provider === "gemini") {
+      defaultModel = DEFAULT_GEMINI_MODEL;
+    } else if (provider === "openai") {
+      defaultModel = DEFAULT_OPENAI_MODEL;
+    } else {
+      defaultModel = DEFAULT_OPENROUTER_MODEL;
+    }
 
     const newId = addSource({
       name,
       provider,
       apiKey: apiKey ?? null,
-      baseUrl:
-        apiAddress ??
-        (provider === "gemini"
-          ? DEFAULT_GEMINI_BASE_URL
-          : DEFAULT_OPENAI_BASE_URL),
-      model:
-        provider === "gemini" ? DEFAULT_GEMINI_MODEL : DEFAULT_OPENAI_MODEL,
+      baseUrl: apiAddress ?? defaultBaseUrl,
+      model: defaultModel,
       traits: undefined,
       thinkingBudget: provider === "gemini" ? 8192 : undefined,
       enabled: true,
@@ -87,6 +107,12 @@ export default function AddAISourceDialog({
         name,
       }),
     );
+  };
+
+  const getPlaceholderUrl = () => {
+    if (newProvider === "gemini") return DEFAULT_GEMINI_BASE_URL;
+    if (newProvider === "openai") return DEFAULT_OPENAI_BASE_URL;
+    return DEFAULT_OPENROUTER_BASE_URL;
   };
 
   return (
@@ -108,6 +134,7 @@ export default function AddAISourceDialog({
             >
               <option value="gemini">{t("sources.providers.gemini")}</option>
               <option value="openai">{t("sources.providers.openai")}</option>
+              <option value="openrouter">{t("sources.providers.openrouter")}</option>
             </select>
           </div>
           <div className="space-y-2">
@@ -137,11 +164,7 @@ export default function AddAISourceDialog({
               value={apiAddress}
               type="url"
               onChange={(event) => setApiAddress(event.target.value)}
-              placeholder={
-                newProvider === "gemini"
-                  ? DEFAULT_GEMINI_BASE_URL
-                  : DEFAULT_OPENAI_BASE_URL
-              }
+              placeholder={getPlaceholderUrl()}
             />
           </div>
         </div>

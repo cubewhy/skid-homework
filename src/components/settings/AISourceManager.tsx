@@ -1,5 +1,4 @@
 import AddAISourceDialog from "@/components/dialogs/settings/AddAISourceDialog";
-import { InfoTooltip } from "@/components/InfoTooltip";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -9,7 +8,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { QWEN_TOKEN_URL } from "@/lib/qwen";
 import { cn } from "@/lib/utils";
 import { AiSource, ImportAISourceModel, useAiStore } from "@/store/ai-store";
 import { Plus, Share2Icon, Trash2 } from "lucide-react";
@@ -18,12 +16,9 @@ import { useTranslation } from "react-i18next";
 import { DEFAULT_BASE_BY_PROVIDER } from "./SettingsPage";
 import ShareAISourceDialog from "@/components/dialogs/settings/ShareAISourceDialog";
 import { toast } from "sonner";
-import { useSettingsStore } from "@/store/settings-store";
-import { Badge } from "@/components/ui/badge";
 
 export default function AISourceManager() {
   const { t } = useTranslation("commons", { keyPrefix: "settings-page" });
-  const { t: tQwen } = useTranslation("commons", { keyPrefix: "qwen-callout" });
   const [addDialogOpen, setAddDialogOpen] = useState(false);
 
   const sources = useAiStore((s) => s.sources);
@@ -31,8 +26,6 @@ export default function AISourceManager() {
   const setActiveSource = useAiStore((s) => s.setActiveSource);
   const toggleSource = useAiStore((s) => s.toggleSource);
   const removeSource = useAiStore((s) => s.removeSource);
-
-  const { showQwenHint } = useSettingsStore((s) => s);
 
   const [shareDialogUrl, setShareDialogUrl] = useState("");
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
@@ -70,21 +63,6 @@ export default function AISourceManager() {
       );
     }
   };
-
-  const qwenTooltipContent = (
-    <span>
-      {tQwen("tooltip.prefix")}{" "}
-      <a
-        href={QWEN_TOKEN_URL}
-        target="_blank"
-        rel="noreferrer"
-        className="underline underline-offset-2"
-      >
-        {tQwen("tooltip.link")}
-      </a>
-      {tQwen("tooltip.suffix")}
-    </span>
-  );
 
   return (
     <>
@@ -183,27 +161,6 @@ export default function AISourceManager() {
                 </div>
               );
             })}
-            {showQwenHint && (
-              <div className="flex flex-col gap-3 rounded-md border border-dashed border-primary/40 bg-primary/5 p-4 md:flex-row md:items-center md:justify-between">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-semibold">{tQwen("title")}</p>
-                    <InfoTooltip
-                      content={qwenTooltipContent}
-                      ariaLabel={tQwen("title")}
-                    />
-                  </div>
-                  <Badge variant="secondary" className="w-fit">
-                    {tQwen("badge")}
-                  </Badge>
-                </div>
-                <Button asChild className="w-full md:w-auto">
-                  <a href={QWEN_TOKEN_URL} target="_blank" rel="noreferrer">
-                    {tQwen("button")}
-                  </a>
-                </Button>
-              </div>
-            )}
           </div>
         </CardContent>
       </Card>

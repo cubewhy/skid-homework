@@ -20,6 +20,9 @@ importers:
       '@opennextjs/cloudflare':
         specifier: ^1.14.6
         version: 1.14.6(next@16.0.10(@babel/core@7.28.5)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(wrangler@4.54.0)
+      '@openrouter/sdk':
+        specifier: ^0.3.11
+        version: 0.3.11
       '@radix-ui/react-accordion':
         specifier: ^1.2.12
         version: 1.2.12(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -1702,6 +1705,9 @@ packages:
     peerDependencies:
       next: ^14.2.35 || ~15.0.7 || ~15.1.11 || ~15.2.8 || ~15.3.8 || ~15.4.10 || ~15.5.9 || ^16.0.10
       wrangler: ^4.53.0
+
+  '@openrouter/sdk@0.3.11':
+    resolution: {integrity: sha512-lXhyY+AFvrOjAqg6fktd/3S/6J5u5yp1nYyP6yluqVTzgnsfZs8/QM3rGa0kZdhB4d/fzJhyT+4oGNM55fH31g==}
 
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
@@ -8683,6 +8689,10 @@ snapshots:
       - aws-crt
       - encoding
       - supports-color
+
+  '@openrouter/sdk@0.3.11':
+    dependencies:
+      zod: 4.1.13
 
   '@pkgjs/parseargs@0.11.0':
     optional: true

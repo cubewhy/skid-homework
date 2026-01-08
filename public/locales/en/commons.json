@@ -272,7 +272,8 @@
       "option": "{{name}} • {{provider}}",
       "providers": {
         "gemini": "Gemini",
-        "openai": "OpenAI"
+        "openai": "OpenAI",
+        "openrouter": "OpenRouter"
       },
       "add": {
         "label": "Add AI source",
@@ -467,11 +468,13 @@
         "base-url-helper": "Leave blank to use the default endpoint for {{provider}}."
       },
       "api-hint": "Get an API key at <link>Google AI Studio</link>.",
+      "api-hint-openrouter": "Get an API key at <link>OpenRouter Keys</link>.",
       "storage-note": "We store your key locally using encrypted browser storage and never send it to our servers.",
       "provider": {
         "label": "AI provider"
       },
-      "api-hint-openai": "Get an API key at <link>OpenAI Dashboard</link>."
+      "api-hint-openai": "Get an API key at <link>OpenAI Dashboard</link>.",
+      "skip": "Set API Key Later"
     },
     "preview": {
       "title": "Homework Camera",

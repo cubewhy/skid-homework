@@ -71,6 +71,9 @@ export interface SettingsState {
 
   showOnlineSearchInScanner: boolean;
   setShowOnlineSearchInScanner: (state: boolean) => void;
+
+  skipInit: boolean;
+  setSkipInit: (skip: boolean) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -88,6 +91,7 @@ export const useSettingsStore = create<SettingsState>()(
       onlineSearchEnabled: false,
       showModelSelectorInScanner: false,
       showOnlineSearchInScanner: false,
+      skipInit: false,
 
       setImageEnhancement: (state) => set({ imageEnhancement: state }),
       setShowQwenHint: (state) => set({ showQwenHint: state }),
@@ -126,6 +130,7 @@ export const useSettingsStore = create<SettingsState>()(
         set({ showModelSelectorInScanner: state }),
       setShowOnlineSearchInScanner: (state) =>
         set({ showOnlineSearchInScanner: state }),
+      setSkipInit: (skip) => set({ skipInit: skip }),
     }),
     {
       name: "skidhw-storage",
@@ -143,6 +148,7 @@ export const useSettingsStore = create<SettingsState>()(
         onlineSearchEnabled: state.onlineSearchEnabled,
         showModelSelectorInScanner: state.showModelSelectorInScanner,
         showOnlineSearchInScanner: state.showOnlineSearchInScanner,
+        skipInit: state.skipInit,
       }),
       version: 7,
       migrate: (persistedState, version) => {

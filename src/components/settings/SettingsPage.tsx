@@ -1,10 +1,10 @@
 "use client";
 
-import { useQwenHintAutoToggle } from "@/hooks/useQwenHintAutoToggle";
 import { cn } from "@/lib/utils";
 import {
   DEFAULT_GEMINI_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
+  DEFAULT_OPENROUTER_BASE_URL,
   useAiStore,
   type AiModelSummary,
   type AiProvider,
@@ -55,6 +55,7 @@ import ExplanationModeSelector from "./ExplanationModeSelector";
 export const DEFAULT_BASE_BY_PROVIDER: Record<AiProvider, string> = {
   gemini: DEFAULT_GEMINI_BASE_URL,
   openai: DEFAULT_OPENAI_BASE_URL,
+  openrouter: DEFAULT_OPENROUTER_BASE_URL,
 };
 
 type BackButtonProps = {
@@ -95,8 +96,6 @@ export default function SettingsPage() {
   const {
     imageEnhancement: imageEnhancement,
     setImageEnhancement: setImageEnhancement,
-    showQwenHint,
-    setShowQwenHint,
     onlineSearchEnabled,
     setOnlineSearchEnabled,
     showModelSelectorInScanner,
@@ -120,7 +119,6 @@ export default function SettingsPage() {
     () => sources.find((source) => source.id === activeSourceId) ?? sources[0],
     [sources, activeSourceId],
   );
-  useQwenHintAutoToggle(sources, showQwenHint, setShowQwenHint);
 
   const localTraits = useMemo(() => activeSource?.traits ?? "", [activeSource]);
   const localThinkingBudget = useMemo(
@@ -631,17 +629,6 @@ export default function SettingsPage() {
               />
               <Label htmlFor="image-enhancement">
                 {t("advanced.image-post-processing.enhancement")}
-              </Label>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <Checkbox
-                id="show-qwen-hint"
-                checked={showQwenHint}
-                onCheckedChange={(state) => setShowQwenHint(Boolean(state))}
-              />
-              <Label htmlFor="show-qwen-hint">
-                {t("advanced.ui.show-qwen-hint")}
               </Label>
             </div>
 

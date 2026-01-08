@@ -1,11 +1,12 @@
 import { GeminiAi } from "@/ai/gemini";
 import { v4 as uuidv4 } from "uuid";
 import { OpenAiClient } from "@/ai/openai";
+import { OpenRouterClient } from "@/ai/openrouter";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import type { AiChatMessage } from "@/ai/chat-types";
 
-export type AiProvider = "gemini" | "openai";
+export type AiProvider = "gemini" | "openai" | "openrouter";
 
 export type AiModelSummary = {
   name: string;
@@ -57,6 +58,8 @@ export const DEFAULT_GEMINI_BASE_URL =
   "https://generativelanguage.googleapis.com";
 export const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
 export const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+export const DEFAULT_OPENROUTER_MODEL = "google/gemini-2.0-flash-exp:free";
+export const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
 function loadLegacyGemini(): Partial<AiSource> | null {
   if (typeof window === "undefined") return null;
@@ -112,6 +115,17 @@ function createDefaultSources(): AiSource[] {
       thinkingBudget: undefined,
       enabled: false,
     },
+    {
+      id: "openrouter-default",
+      name: "OpenRouter",
+      provider: "openrouter",
+      apiKey: null,
+      baseUrl: DEFAULT_OPENROUTER_BASE_URL,
+      model: DEFAULT_OPENROUTER_MODEL,
+      traits: undefined,
+      thinkingBudget: undefined,
+      enabled: false,
+    },
   ];
 }
 
@@ -126,6 +140,10 @@ function createClientForSource(source: AiSource): AiClient | null {
 
   if (source.provider === "openai") {
     return new OpenAiClient(source.apiKey, source.baseUrl);
+  }
+
+  if (source.provider === "openrouter") {
+    return new OpenRouterClient(source.apiKey, source.baseUrl);
   }
 
   return null;

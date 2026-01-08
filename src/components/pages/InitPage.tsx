@@ -5,10 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { Badge } from "../ui/badge";
 import {
   DEFAULT_GEMINI_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
+  DEFAULT_OPENROUTER_BASE_URL,
   useAiStore,
 } from "@/store/ai-store";
 import { useSettingsStore } from "@/store/settings-store";
@@ -20,17 +20,13 @@ import {
 } from "../ui/accordion";
 import { Label } from "../ui/label";
 import { Trans, useTranslation } from "react-i18next";
-import { InfoTooltip } from "../InfoTooltip";
-import { useQwenHintAutoToggle } from "@/hooks/useQwenHintAutoToggle";
-import { QWEN_TOKEN_URL } from "@/lib/qwen";
 
 export default function InitPage() {
   const sources = useAiStore((s) => s.sources);
   const activeSourceId = useAiStore((s) => s.activeSourceId);
   const setActiveSource = useAiStore((s) => s.setActiveSource);
   const updateSource = useAiStore((s) => s.updateSource);
-  const showQwenHint = useSettingsStore((s) => s.showQwenHint);
-  const setShowQwenHint = useSettingsStore((s) => s.setShowQwenHint);
+  const setSkipInit = useSettingsStore((s) => s.setSkipInit);
 
   const activeSource = useMemo(
     () => sources.find((source) => source.id === activeSourceId) ?? sources[0],
@@ -50,24 +46,6 @@ export default function InitPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useTranslation("commons", { keyPrefix: "init-page" });
-  const { t: tCommon } = useTranslation("commons");
-
-  useQwenHintAutoToggle(sources, showQwenHint, setShowQwenHint);
-
-  const qwenTooltipContent = (
-    <span>
-      {tCommon("qwen-callout.tooltip.prefix")}{" "}
-      <a
-        href={QWEN_TOKEN_URL}
-        target="_blank"
-        rel="noreferrer"
-        className="underline underline-offset-2"
-      >
-        {tCommon("qwen-callout.tooltip.link")}
-      </a>
-      {tCommon("qwen-callout.tooltip.suffix")}
-    </span>
-  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,15 +54,28 @@ export default function InitPage() {
     if (!trimmedKey) return;
 
     const trimmedBase = (baseUrl ?? "").trim();
+    
+    let defaultBaseUrl = "";
+    if (activeSource.provider === "gemini") {
+      defaultBaseUrl = DEFAULT_GEMINI_BASE_URL;
+    } else if (activeSource.provider === "openai") {
+      defaultBaseUrl = DEFAULT_OPENAI_BASE_URL;
+    } else {
+      defaultBaseUrl = DEFAULT_OPENROUTER_BASE_URL;
+    }
+
     updateSource(activeSource.id, {
       apiKey: trimmedKey || null,
-      baseUrl:
-        trimmedBase ||
-        (activeSource.provider === "gemini"
-          ? DEFAULT_GEMINI_BASE_URL
-          : DEFAULT_OPENAI_BASE_URL),
+      baseUrl: trimmedBase || defaultBaseUrl,
       enabled: true,
     });
+    const from = searchParams.get("from");
+    const to = from && from !== "/init" ? from : "/";
+    router.replace(to);
+  };
+
+  const handleSkip = () => {
+    setSkipInit(true);
     const from = searchParams.get("from");
     const to = from && from !== "/init" ? from : "/";
     router.replace(to);
@@ -211,35 +202,6 @@ export default function InitPage() {
                 </Button>
               </div>
 
-              {showQwenHint && (
-                <motion.div
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3 }}
-                  className="w-full max-w-md rounded-2xl border border-indigo-300/60 bg-white/90 p-4 text-slate-900 shadow-md dark:border-slate-700/60 dark:bg-slate-900/60 dark:text-slate-100"
-                >
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-semibold">
-                      {tCommon("qwen-callout.title")}
-                    </p>
-                    <InfoTooltip
-                      content={qwenTooltipContent}
-                      ariaLabel={tCommon("qwen-callout.title")}
-                    />
-                  </div>
-                  <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <Badge variant="secondary" className="w-fit">
-                      {tCommon("qwen-callout.badge")}
-                    </Badge>
-                    <Button asChild size="sm" className="sm:w-auto">
-                      <a href={QWEN_TOKEN_URL} target="_blank" rel="noreferrer">
-                        {tCommon("qwen-callout.button")}
-                      </a>
-                    </Button>
-                  </div>
-                </motion.div>
-              )}
-
               {/* START: Advanced settings section, collapsible */}
               <Accordion type="single" collapsible className="w-full max-w-md">
                 <AccordionItem value="advanced-settings" className="border-b-0">
@@ -273,6 +235,17 @@ export default function InitPage() {
               </Accordion>
               {/* END: Advanced settings section */}
             </motion.form>
+
+            <div className="mt-4 w-full max-w-md flex justify-center">
+              <Button 
+                variant="ghost" 
+                onClick={handleSkip} 
+                className="text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              >
+                {t("form.skip")}
+              </Button>
+            </div>
+
             <p className="mt-3 text-xs text-slate-400">
               {activeSource?.provider === "gemini" ? (
                 <Trans
@@ -282,6 +255,19 @@ export default function InitPage() {
                     link: (
                       <a
                         href="https://aistudio.google.com/api-keys"
+                        className="underline"
+                      />
+                    ),
+                  }}
+                />
+              ) : activeSource?.provider === "openrouter" ? (
+                <Trans
+                  t={t}
+                  i18nKey="form.api-hint-openrouter"
+                  components={{
+                    link: (
+                      <a
+                        href="https://openrouter.ai/keys"
                         className="underline"
                       />
                     ),

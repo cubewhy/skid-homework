@@ -268,7 +268,8 @@
       "option": "{{name}} • {{provider}}",
       "providers": {
         "gemini": "Gemini",
-        "openai": "OpenAI"
+        "openai": "OpenAI",
+        "openrouter": "OpenRouter"
       },
       "add": {
         "label": "新增 AI 源",
@@ -463,11 +464,13 @@
         "base-url-helper": "留空将使用 {{provider}} 的默认地址。"
       },
       "api-hint": "在 <link>Google AI Studio</link> 申请 API Key。",
+      "api-hint-openrouter": "在 <link>OpenRouter Keys</link> 申请 API Key。",
       "storage-note": "我们使用加密浏览器存储在本地保存你的密钥，绝不会上传到服务器。",
       "provider": {
         "label": "AI 提供商"
       },
-      "api-hint-openai": "在 <link>OpenAI 控制台</link> 申请 API Key。"
+      "api-hint-openai": "在 <link>OpenAI 控制台</link> 申请 API Key。",
+      "skip": "稍后再设置 API 密钥"
     },
     "preview": {
       "title": "作业相机",
