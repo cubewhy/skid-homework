@@ -1,442 +1,442 @@
 interface Resources {
   "commons": {
     "actions": {
-      "chat": "聊天",
-      "clear-all": "清空所有文件",
-      "clear-confirmation": "再点击一次",
+      "chat": "Chat",
+      "clear-all": "Clear All",
+      "clear-confirmation": "Click again to clear",
       "global-traits": {
-        "desc": "自定义提示词将被拼接到最终的AI查询中",
-        "placeholder": "你是一个聪明的AI助手, 为作业求解而设计",
-        "submit-btn": "提交",
-        "title": "编辑全局提示词",
-        "trigger": "全局提示词编辑器"
+        "desc": "The prompt will be append into the query when you skid your homework to personalize the response.",
+        "placeholder": "You're a smart assistant that helps the user with the homework.",
+        "submit-btn": "Submit",
+        "title": "Edit Global Traits",
+        "trigger": "Global Traits Editor"
       },
-      "processing": "处理中...",
-      "scan": "开始打滑",
-      "settings": "设置",
-      "title": "添加作业"
+      "processing": "Processing...",
+      "scan": "Let's Skid",
+      "settings": "Settings",
+      "title": "Add Homework"
     },
     "chat-page": {
       "actions": {
-        "back": "返回扫描页",
-        "close-sidebar": "关闭侧边栏",
-        "delete-chat": "删除对话",
-        "new-chat": "新对话",
-        "open-settings": "设置",
-        "search": "搜索聊天..."
+        "back": "Back to Scanner",
+        "close-sidebar": "Close Sidebar",
+        "delete-chat": "Delete Chat",
+        "new-chat": "New Chat",
+        "open-settings": "Settings",
+        "search": "Search chats..."
       },
       "composer": {
-        "aigc-disclaimer": "AI 会犯错, 请核对重要信息",
-        "placeholder": "输入问题或粘贴题目...",
-        "send": "发送",
-        "sending": "发送中..."
+        "aigc-disclaimer": "AI can make mistakes. Verify important information.",
+        "placeholder": "Ask a question or paste a problem...",
+        "send": "Send",
+        "sending": "Sending..."
       },
       "conversation": {
-        "empty": "选择一个对话或新建一个对话开始聊天。",
-        "empty-title": "未选择对话"
+        "empty": "Select a chat or start a new one to begin.",
+        "empty-title": "No conversation selected"
       },
       "errors": {
-        "missing-key": "{{provider}} 尚未配置 API 密钥。",
-        "no-model": "请先填写模型名称。",
-        "no-source": "请先在设置中启用至少一个已配置密钥的 AI 源。",
-        "send-failed": "发送消息失败：{{error}}",
-        "unsupported": "当前模型不支持对话功能。"
+        "missing-key": "{{provider}} needs an API key before you can chat.",
+        "no-model": "Please set a model name before chatting.",
+        "no-source": "Please enable at least one source with an API key in Settings.",
+        "send-failed": "Failed to send message: {{error}}",
+        "unsupported": "The selected model does not support conversations."
       },
       "history": {
-        "empty": "还没有聊天记录，先开始一个对话吧。",
-        "title": "历史记录",
-        "unknown-source": "未知来源",
-        "untitled": "新对话"
+        "empty": "No chats yet. Start a conversation.",
+        "title": "History",
+        "unknown-source": "Unknown provider",
+        "untitled": "New chat"
       },
       "source": {
-        "empty": "没有匹配的模型",
-        "model": "模型名称",
-        "model-placeholder": "例如 gpt-4.1-mini 或 models/gemini-2.5-pro",
-        "search": "搜索模型...",
-        "section": "模型",
+        "empty": "No models found.",
+        "model": "Model name",
+        "model-placeholder": "gpt-4.1-mini or models/gemini-2.5-pro",
+        "search": "Search model...",
+        "section": "Model",
         "select": {
-          "placeholder": "选择模型"
+          "placeholder": "Select a model"
         }
       },
-      "subtitle": "与已配置的模型一起讨论作业。",
-      "title": "打滑作业聊天"
+      "subtitle": "Discuss problems with your configured models.",
+      "title": "SkidHomework Chat"
     },
     "import-settings-page": {
       "confirm": {
         "alert": {
-          "description": "仅从可信来源导入配置，否则可能导致隐私泄露，请自行承担风险。",
-          "title": "安全提醒"
+          "description": "Only import configurations from sources you trust. Otherwise it may cause a privacy leak. Use at your own risk.",
+          "title": "Security Check"
         },
         "buttons": {
-          "cancel": "取消",
-          "confirm": "确认导入"
+          "cancel": "Cancel",
+          "confirm": "Yes, Import"
         },
-        "description": "要将此配置添加到你的设置中吗？",
+        "description": "Do you want to add this configuration to your settings?",
         "fields": {
-          "base": "基础 URL：",
-          "model": "模型名称：",
-          "name": "名称：",
-          "provider": "提供商："
+          "base": "Base URL:",
+          "model": "Model Name:",
+          "name": "Name:",
+          "provider": "Provider:"
         },
-        "title": "导入 AI 模型"
+        "title": "Import AI Model"
       },
       "error": {
-        "home": "返回首页",
-        "parse-failed": "无法解析配置，链接可能已损坏。",
-        "title": "错误"
+        "home": "Return Home",
+        "parse-failed": "Failed to parse configuration. The link might be broken.",
+        "title": "Error"
       },
       "loading": {
-        "parsing": "正在解析配置..."
+        "parsing": "Parsing configuration..."
       },
       "success": {
         "buttons": {
-          "home": "返回首页",
-          "settings": "设置",
-          "undo": "撤销"
+          "home": "Let's Skid",
+          "settings": "Settings",
+          "undo": "Undo"
         },
-        "description": "AI 模型 <strong>{{name}}</strong> 已成功导入。",
-        "title": "全部就绪！"
+        "description": "The AI model <strong>{{name}}</strong> has been successfully imported.",
+        "title": "You're all set!"
       }
     },
     "improve-dialog": {
-      "description": "基于当前答案和你的提示，让 AI 生成更详细的解答。",
-      "placeholder": "例如：请添加更详细的步骤……",
-      "submit": "提交",
-      "title": "优化答案",
+      "description": "Generate a more detailed solution using the current solution and your prompt.",
+      "placeholder": "Make it more detailed...",
+      "submit": "Submit",
+      "title": "Improve the Solution",
       "toasts": {
         "failed": {
-          "description": "出错了：{{error}}",
-          "parse": "解析响应失败，请打开开发者工具查看更多详情。",
-          "title": "优化失败"
+          "description": "Something went wrong: {{error}}",
+          "parse": "Failed to parse response, see the developer tools for more details.",
+          "title": "Failed to improve your solution"
         },
         "no-key": {
-          "description": "请在设置中为 {{provider}} 设置 API 密钥后再尝试。",
-          "title": "就差一步"
+          "description": "Please set an API key for {{provider}} in Settings to continue.",
+          "title": "You're almost there"
         },
         "no-source": {
-          "description": "请先在设置中启用至少一个 AI 源。",
-          "title": "暂无可用 AI 源"
-        },
-        "post-processing": {
-          "description": "图片预处理还在运行, 请再等等",
-          "title": "还在处理..."
+          "description": "Enable at least one AI provider in Settings before improving a solution.",
+          "title": "No AI sources"
         },
         "processing": {
-          "description": "正在使用 AI 优化你的解答，请耐心等待...",
-          "title": "处理中"
+          "description": "Improving your solution with AI...Please wait for a while...",
+          "title": "Processing"
         }
       },
-      "trigger": "优化答案"
+      "trigger": "Improve the Solution"
     },
     "init-page": {
       "features": {
-        "camera": "拍下作业，立刻获得逐步讲解。",
-        "setup": "快速上手——粘贴 Gemini API Key 就能开始。",
-        "telemetry": "无遥测、无骚扰请求，只使用 Gemini API。"
+        "camera": "Snap homework and get step-by-step help.",
+        "setup": "Fast setup — paste your Gemini API key and go.",
+        "telemetry": "No telemetry or spammy calls. Just the Gemini API."
       },
       "footer": {
-        "notice": "基于 GPLv3 许可，由 cubewhy 创建。",
-        "source": "源代码"
+        "notice": "Licensed under GPLv3, created by cubewhy.",
+        "source": "Source Code"
       },
       "form": {
         "advanced": {
-          "base-url-helper": "留空将使用 {{provider}} 的默认地址。",
-          "base-url-label": "API 基础地址（可选）",
-          "base-url-placeholder": "{{provider}} 的默认接口地址",
-          "title": "高级选项"
+          "base-url-helper": "Leave blank to use the default endpoint for {{provider}}.",
+          "base-url-label": "API Base URL (optional)",
+          "base-url-placeholder": "Default endpoint for {{provider}}",
+          "title": "Advanced"
         },
-        "api-hint": "在 <link>Google AI Studio</link> 申请 API Key。",
-        "api-hint-openai": "在 <link>OpenAI 控制台</link> 申请 API Key。",
-        "api-hint-openrouter": "在 <link>OpenRouter Keys</link> 申请 API Key。",
-        "key-placeholder": "{{provider}} API 密钥",
+        "api-hint": "Get an API key at <link>Google AI Studio</link>.",
+        "api-hint-openai": "Get an API key at <link>OpenAI Dashboard</link>.",
+        "api-hint-openrouter": "Get an API key at <link>OpenRouter Keys</link>.",
+        "key-placeholder": "{{provider}} API Key",
         "provider": {
-          "label": "AI 提供商"
+          "label": "AI provider"
         },
-        "skip": "稍后再设置 API 密钥",
-        "storage-note": "我们使用加密浏览器存储在本地保存你的密钥，绝不会上传到服务器。",
-        "submit": "帮我省时间！"
+        "skip": "Set API Key Later",
+        "storage-note": "We store your key locally using encrypted browser storage and never send it to our servers.",
+        "submit": "Get My Time Back!"
       },
       "headline": {
-        "highlight": "欢迎来到 SkidHomework",
-        "subtitle": "摆脱作业内卷。"
+        "highlight": "Welcome to SkidHomework",
+        "subtitle": "Escape the homework grind."
       },
-      "intro": "喜欢可汗学院式的自学，却常被堆积如山的作业拖住脚步？SkidHomework 本地运行，尊重你的隐私，让你把精力放在学习上，而不是重复劳动。",
+      "intro": "Prefer Khan Academy–style self-study but still get stuck with endless assignments? SkidHomework runs locally, respects your privacy, and helps you focus on learning instead of busywork.",
       "preview": {
-        "hints": "提示",
+        "hints": "Hints",
         "ocr": "OCR",
-        "steps": "步骤",
-        "title": "作业相机"
+        "steps": "Steps",
+        "title": "Homework Camera"
       },
-      "tagline": "本地 • 私密 • 免费"
+      "tagline": "Local • Private • Free"
     },
     "inspect-dialog": {
-      "answer": "答案",
-      "close": "关闭窗口",
-      "desc": "查看原始的 Markdown 文本",
-      "explanation": "解析",
-      "problem": "题目",
-      "title": "检查原始数据"
+      "answer": "Answer",
+      "close": "Close",
+      "desc": "Review the AI generated Markdown content.",
+      "explanation": "Explanation",
+      "problem": "Problem",
+      "title": "Inspect Details"
     },
     "md": {
       "diagram": {
-        "view-code": "查看代码",
-        "view-diagram": "查看图像"
+        "view-code": "View Code",
+        "view-diagram": "View Diagram"
       },
-      "generating-diagram": "生成图片中..."
+      "generating-diagram": "Generating diagram..."
     },
     "preview": {
-      "drag-tip": "你可以把文件拖动到这个窗口中, 或者粘贴屏幕截图",
-      "drag-tip-mobile": "轻触卡片即可放大，左右滑动快速浏览。",
-      "drop-cancel": "拖到这里取消",
+      "drag-tip": "You can drag or paste your files to this panel.",
+      "drag-tip-mobile": "Tap a card to zoom in. Swipe left or right to review everything.",
+      "drop-cancel": "Drag here to cancel",
       "file-type": {
         "pdf": "PDF",
-        "unknown": "未知类型"
+        "unknown": "Unknown type"
       },
-      "image-alt": "作业预览",
-      "no-files": "没有文件 上传或拍照以开始",
-      "remove-aria": "移除图片",
-      "supported-types": "支持图片、文本、Markdown、JSON 等格式",
-      "title": "预览"
+      "image-alt": "Homework preview",
+      "no-files": "No files yet. Upload or take a photo to begin.",
+      "remove-aria": "Remove image",
+      "supported-types": "Supports images, text, Markdown, JSON, etc.",
+      "title": "Preview"
     },
     "problem-list": {
-      "item-label": "题目 {{index}}"
+      "item-label": "Problem {{index}}"
     },
     "qwen-callout": {
-      "badge": "免费",
-      "button": "点击获取",
-      "title": "官方 Qwen3 服务",
+      "badge": "Free",
+      "button": "Get token",
+      "title": "Official Qwen3 Service",
       "tooltip": {
-        "link": "控制台 -> 令牌管理",
-        "prefix": "如何导入到 SkidHomework？你可以前往",
-        "suffix": "-> 聊天 快捷导入 SkidHomework。"
+        "link": "Console -> Token Management",
+        "prefix": "How to import into SkidHomework? Visit",
+        "suffix": "-> Chat quick import for SkidHomework."
       }
     },
     "scan-page": {
-      "discussions-btn": "讨论区",
+      "discussions-btn": "Discussions",
       "errors": {
-        "missing-key": "{{provider}} 尚未配置 API 密钥。",
-        "parsing-failed": "解析 AI 返回内容失败。",
+        "missing-key": "Missing API key for {{provider}}.",
+        "parsing-failed": "Failed to parse the AI response.",
         "processing-failed": {
-          "answer": "请检查控制台中的错误并重试。",
+          "answer": "Please check the console for errors and try again.",
           "explanation": "{{error}}",
-          "problem": "多次重试后仍然处理失败。"
+          "problem": "Processing failed after multiple retries."
         }
       },
       "footer": {
-        "license": "基于 GPL-3.0 许可发布。",
-        "slogan": "学生的时间很宝贵",
-        "source": "源代码"
+        "license": "Licensed under GPL-3.0.",
+        "slogan": "Students' lives matter",
+        "source": "Source code"
       },
       "mobile": {
-        "empty": "先添加照片或 PDF 开始使用。",
-        "hint-pdf": "启用 Gemini 源即可支持 PDF 上传。",
-        "hint-ready": "可以开始识别了，准备好后点击「开始打滑」。",
-        "status": "已有 {{count}} 个文件",
-        "status_plural": "已有 {{count}} 个文件",
+        "empty": "Add a photo or PDF to get started.",
+        "hint-pdf": "Enable a Gemini source in Settings to allow PDF uploads.",
+        "hint-ready": "You're ready to scan. Tap “Let's Skid” when you're set.",
+        "status": "{{count}} file ready",
+        "status_plural": "{{count}} files ready",
         "tabs": {
-          "capture": "采集",
-          "preview": "预览"
+          "capture": "Capture",
+          "preview": "Review"
         }
       },
-      "tip": "我们不会在未经授权时上传您的文件",
-      "title": "扫描你的作业",
+      "tip": "We never upload without your action.",
+      "title": "Scan your homework",
       "toasts": {
         "all-processed": {
-          "description": "没有待处理或失败的图片了。",
-          "title": "全部已处理"
+          "description": "There are no pending or failed images to scan.",
+          "title": "All images processed"
         },
         "done": {
-          "description": "你的作业已经处理完成。",
-          "title": "全部完成！"
+          "description": "Your homework has been processed.",
+          "title": "All done!"
         },
         "error": {
-          "description": "处理过程中出了点问题，请查看控制台。",
-          "title": "发生意外错误"
+          "description": "Something went wrong during the process. Please check the console.",
+          "title": "An unexpected error occurred"
         },
         "no-key": {
-          "description": "请在设置中为 {{provider}} 填写 API 密钥。",
-          "title": "还差一步"
+          "description": "Please set an API key for {{provider}} in Settings.",
+          "title": "You're almost there"
         },
         "no-model": {
-          "description": "请先在设置中为 {{provider}} 选择模型。",
-          "title": "需要模型"
+          "description": "Please choose a model for {{provider}} in Settings before scanning.",
+          "title": "Model required"
         },
         "no-source": {
-          "description": "请在设置中启用至少一个已配置密钥的 AI 提供商后再开始扫描。",
-          "title": "尚未配置 AI 源"
+          "description": "Enable at least one AI provider with an API key in Settings before scanning.",
+          "title": "No AI sources configured"
         },
         "pdf-blocked": {
-          "description": "要处理 PDF，请启用 Gemini 源。",
-          "title": "PDF 上传已禁用"
+          "description": "Enable a Gemini source to process PDF files.",
+          "title": "PDF uploads disabled"
+        },
+        "post-processing": {
+          "description": "Your image was still post-processing. Please wait for a while.",
+          "title": "Still processing..."
         },
         "working": {
-          "description": "正在将 {{count}} 个文件发送到 AI 源...",
-          "title": "正在处理..."
+          "description": "Sending {{count}} file(s) to your AI sources...",
+          "title": "Working..."
         }
       }
     },
     "settings-page": {
       "advanced": {
         "custom-base-url": {
-          "helper": "留空将使用 {{provider}} 的默认地址。",
+          "helper": "Leave blank to use the default endpoint for {{provider}}.",
           "placeholder": "https://example.com/v1",
-          "title": "自定义 API 基础地址"
+          "title": "Custom API base URL"
         },
-        "desc": "这些设置会影响上传和界面行为。",
+        "desc": "Extras that affect uploads and the interface.",
         "explanation": {
           "mode": {
-            "everything": "显示所有内容",
-            "steps": "当我需要的时候显示必要的步骤"
+            "everything": "Show everything to me",
+            "steps": "Only show hits when I need"
           },
-          "search-placeholder": "搜索...",
-          "title": "解析显示模式"
+          "search-placeholder": "Search modes...",
+          "title": "Explanation Mode"
         },
         "image-post-processing": {
-          "enhancement": "开启二值化",
-          "title": "图像后处理"
+          "enhancement": "Enable Image Enhancement",
+          "title": "Image Post-processing"
         },
-        "title": "高级设置",
+        "title": "Advanced Settings",
         "ui": {
-          "show-qwen-hint": "显示 Qwen3 服务提示",
-          "title": "界面"
+          "show-qwen-hint": "Show Qwen3 service tip",
+          "title": "UI"
         }
       },
       "api-credentials": {
-        "applied": "API 密钥已保存。",
-        "desc": "为每个 AI 提供商在本地保存 API 密钥，我们不会上传。",
-        "label": "API 密钥",
+        "applied": "API key saved.",
+        "desc": "Store API keys locally for each AI provider. They never leave your browser.",
+        "label": "API Key",
         "name": {
-          "label": "来源名称",
-          "placeholder": "展示在界面中的昵称"
+          "label": "Source name",
+          "placeholder": "Friendly name shown in the app"
         },
-        "placeholder": "请输入 {{provider}} 的 API 密钥",
-        "title": "API 凭据"
+        "placeholder": "Enter your {{provider}} API key",
+        "title": "API Credentials"
       },
       "appearance": {
-        "desc": "自定义界面主题和显示语言。",
+        "desc": "Choose how SkidHomework looks and which language it uses.",
         "language": {
-          "desc": "切换界面显示语言。",
-          "label": "界面语言",
+          "desc": "Switch the interface language.",
+          "label": "Language",
           "options": {
             "en": "English",
             "zh": "中文"
           }
         },
         "theme": {
-          "desc": "使用系统偏好或手动指定明暗模式。",
-          "label": "主题模式",
+          "desc": "Use the system preference or pick a fixed mode.",
+          "label": "Theme",
           "options": {
-            "dark": "深色",
-            "light": "浅色",
-            "system": "跟随系统"
+            "dark": "Dark",
+            "light": "Light",
+            "system": "System"
           }
         },
-        "title": "界面与语言"
+        "title": "Appearance & Language"
       },
-      "back": "返回",
-      "clear-input": "清除",
-      "heading": "SkidHomework 设置",
+      "back": "Back",
+      "clear-input": "Clear",
+      "heading": "SkidHomework Settings",
       "model": {
-        "desc": "选择或手动填写请求所使用的模型。",
+        "desc": "Choose or type the model name used for requests.",
         "fetch": {
-          "error": "获取 {{provider}} 的模型列表失败，请检查 API 密钥或基地址。"
+          "error": "Failed to fetch models for {{provider}}. Check your API key or base URL."
         },
         "manual": {
-          "desc": "如果列表中没有想要的模型，可手动填写名称。",
-          "placeholder": "模型标识符",
-          "title": "自定义模型"
+          "desc": "Enter a model name manually if it is not listed.",
+          "placeholder": "Model identifier",
+          "title": "Custom model"
         },
-        "refresh": "刷新模型列表",
+        "refresh": "Refresh models",
         "sel": {
-          "empty": "未找到匹配的模型。",
-          "none": "未选择模型",
-          "search": "搜索模型...",
-          "unknown": "未知模型（{{name}}）"
+          "empty": "No models found.",
+          "none": "No model selected",
+          "search": "Search model...",
+          "unknown": "Unknown model ({{name}})"
         },
-        "show-selector-in-scanner": "在扫描界面显示模型选择以快速切换模型",
-        "title": "模型配置"
+        "show-selector-in-scanner": "Show model selector in scanner",
+        "title": "Model Configuration"
       },
       "openai": {
         "poll-interval": {
-          "desc": "当响应尚未完成时，两次状态检查之间的等待时间。",
-          "title": "轮询间隔（毫秒）"
+          "desc": "How long to wait between response status checks.",
+          "title": "Polling interval (ms)"
         },
         "poll-timeout": {
-          "desc": "在判定失败前允许轮询的最长时间。",
-          "title": "轮询超时（毫秒）"
+          "desc": "Maximum time to wait for a response before failing.",
+          "title": "Polling timeout (ms)"
         }
       },
-      "reset": "重置",
+      "reset": "Reset",
       "shortcuts": {
         "actions": {
           "adbScreenshot": {
-            "description": "通过 ADB 直接截取已连接安卓设备的屏幕。",
-            "label": "ADB 截图"
+            "description": "Capture the connected Android device's screen via ADB.",
+            "label": "ADB screenshot"
           },
           "camera": {
-            "description": "调用设备相机拍摄作业。",
-            "label": "拍照"
+            "description": "Launches the device camera to capture homework.",
+            "label": "Take photo"
           },
           "clearAll": {
-            "description": "移除所有已上传的文件与结果。",
-            "label": "清空全部"
+            "description": "Removes every uploaded item and solution.",
+            "label": "Clear all"
           },
           "open-global-traits-editor": {
-            "description": "打开提示词编辑对话框",
-            "label": "打开全局提示词编辑器"
+            "description": "Open the editor dialog to edit global traits (prompt)",
+            "label": "Open Global Traits Editor"
           },
           "openChat": {
-            "description": "随时切换到聊天工作区。",
-            "label": "打开聊天"
+            "description": "Jump straight to the chat workspace.",
+            "label": "Open chat"
           },
           "openSettings": {
-            "description": "从任意页面快速进入设置。",
-            "label": "打开设置"
+            "description": "Opens this settings page from anywhere in the app.",
+            "label": "Open settings"
           },
           "startScan": {
-            "description": "将所有待处理的文件发送给 AI 源。",
-            "label": "开始识别"
+            "description": "Sends all pending items to your AI sources.",
+            "label": "Start scan"
           },
           "upload": {
-            "description": "打开文件选择器，挑选图片或 PDF。",
-            "label": "上传文件"
+            "description": "Opens the file picker for selecting images or PDFs.",
+            "label": "Upload files"
           }
         },
-        "clear": "清除",
-        "desc": "为常用操作自定义快捷键，留空则表示禁用该快捷键。",
+        "clear": "Clear",
+        "desc": "Customize the keys used for common actions. Leave blank to disable a shortcut.",
         "manual": {
-          "invalid": "请输入包含修饰键和按键的有效组合。",
-          "placeholder": "手动输入组合（如 Ctrl+1）"
+          "invalid": "Enter a valid shortcut using modifier keys plus a key.",
+          "placeholder": "Type shortcut (e.g. Ctrl+1)"
         },
-        "recording": "请按键…",
-        "reset": "恢复默认",
-        "title": "键盘快捷键",
-        "unassigned": "未设置"
+        "recording": "Press keys…",
+        "reset": "Reset to defaults",
+        "title": "Keyboard shortcuts",
+        "unassigned": "Unassigned"
       },
       "sources": {
         "active": {
-          "badge": "正在编辑",
-          "label": "当前编辑的 AI 源"
+          "badge": "Active",
+          "label": "Active source"
         },
         "add": {
-          "address": "API 地址 ( 可选 )",
-          "cancel": "取消",
-          "confirm": "添加",
-          "key": "API 密钥",
+          "address": "API Base Url (Optional)",
+          "cancel": "Cancel",
+          "confirm": "Add source",
+          "key": "API Key",
           "key-placeholder": "abcdef",
-          "label": "新增 AI 源",
-          "name": "显示名称（可选）",
-          "name-placeholder": "例如：教室 Gemini",
-          "provider": "选择提供商",
-          "success": "已添加 {{name}}。",
-          "title": "新增 AI 源"
+          "label": "Add AI source",
+          "name": "Display name (optional)",
+          "name-placeholder": "e.g. Classroom Gemini",
+          "provider": "Provider",
+          "success": "Added {{name}}.",
+          "title": "Add AI source"
         },
-        "desc": "管理可用的 AI 提供商，并选择要配置的目标。",
+        "desc": "Manage enabled AI providers and choose which one to configure.",
         "enabled": {
-          "label": "已启用的 AI 源",
-          "toggle": "启用"
+          "label": "Enabled sources",
+          "toggle": "Enabled"
         },
-        "make-active": "设为当前配置",
+        "make-active": "Set active",
         "option": "{{name}} • {{provider}}",
         "providers": {
           "gemini": "Gemini",
@@ -444,179 +444,179 @@ interface Resources {
           "openrouter": "OpenRouter"
         },
         "remove": {
-          "error": "至少保留一个 AI 源。",
-          "label": "删除该源",
-          "success": "已删除 {{name}}。"
+          "error": "Keep at least one AI source.",
+          "label": "Remove source",
+          "success": "Removed {{name}}."
         },
         "share": {
           "dialog": {
-            "copy": "复制",
-            "desc": "扫描二维码或者在另一台设备上访问URL来导入AI源. 请保护好这个链接.",
-            "title": "分享AI源"
+            "copy": "Copy",
+            "desc": "Scan the QR code or copy the link below. Treat this URL like a password.",
+            "title": "Share AI Source"
           },
-          "label": "分享该源"
+          "label": "Share source"
         },
-        "title": "AI 源管理"
+        "title": "AI Sources"
       },
       "thinking": {
-        "budget": "可用思考预算",
-        "desc": "针对支持的提供商调整高级思考设置。",
+        "budget": "Thinking budget",
+        "desc": "Adjust advanced thinking parameters for supported providers.",
         "online-search": {
-          "desc": "在需要时允许助手调用联网搜索工具。",
-          "show-toggle-in-scanner": "在扫描界面显示联网搜索按钮以快速切换",
-          "title": "联网搜索",
-          "toggle": "启用联网搜索"
+          "desc": "Allow the assistant to call web search tools when needed.",
+          "show-toggle-in-scanner": "Show online search toggle in scanner",
+          "title": "Online search",
+          "toggle": "Enable online search"
         },
-        "title": "思考参数",
-        "tokens-unit": "Tokens"
+        "title": "Thinking Settings",
+        "tokens-unit": "tokens"
       },
       "traits": {
-        "desc": "定义助手的角色、语气或额外指示。",
-        "placeholder": "例如：你是一位语气亲切且专业的学习助手。",
-        "title": "系统提示（Traits）"
+        "desc": "Define the assistant's persona or extra instructions.",
+        "placeholder": "e.g., You are a helpful assistant that speaks in a friendly and professional tone.",
+        "title": "System Prompt (Traits)"
       }
     },
     "solution-viewer": {
-      "answer": "答案",
+      "answer": "Answer",
       "chat": {
-        "button": "与 AI 聊聊",
+        "button": "Chat about this",
         "context": {
-          "answer": "答案：\n{{answer}}",
-          "explanation": "解析：\n{{explanation}}",
-          "intro": "学习者正在查看以下内容：",
-          "problem": "题目：\n{{problem}}"
+          "answer": "Answer:\n{{answer}}",
+          "explanation": "Explanation:\n{{explanation}}",
+          "intro": "The learner is reviewing the following work:",
+          "problem": "Problem:\n{{problem}}"
         },
-        "default-title": "作业对话",
+        "default-title": "Homework chat",
         "fallback": {
-          "answer": "答案信息缺失。",
-          "explanation": "解析信息缺失。",
-          "problem": "题目信息缺失。"
+          "answer": "Answer not available.",
+          "explanation": "Explanation not available.",
+          "problem": "Problem not available."
         },
         "no-problem": {
-          "description": "请选择一个题目后再开始对话。",
-          "title": "请先选择题目"
+          "description": "Choose a problem before starting a chat.",
+          "title": "Select a problem first"
         },
         "no-source": {
-          "description": "请先在设置中添加带密钥的 AI 源，再发起对话。",
-          "title": "暂无可用模型"
+          "description": "Configure an AI source with an API key in Settings to chat.",
+          "title": "No model available"
         },
         "prefill": {
-          "intro": "我想更好地理解这道题。",
-          "outro": "可以一步步帮我讲解吗？"
+          "intro": "I'd like help understanding this problem.",
+          "outro": "Can you walk me through it step by step?"
         }
       },
       "copy": {
-        "button": "复制答案",
+        "button": "Copy answer",
         "failed": {
-          "description": "请手动复制。",
-          "title": "复制失败"
+          "description": "Please copy manually.",
+          "title": "Copy failed"
         },
         "success": {
-          "description": "答案已复制到剪贴板。",
-          "title": "已复制"
+          "description": "Answer copied to clipboard.",
+          "title": "Copied"
         }
       },
-      "explanation": "解析",
+      "explanation": "Explanation",
       "navigation": {
-        "next-image": "文件 ⟶",
-        "next-problem": "下一题",
-        "prev-image": "⟵ 文件",
-        "prev-problem": "上一题"
+        "next-image": "File ⟶",
+        "next-problem": "Next",
+        "prev-image": "⟵ File",
+        "prev-problem": "Prev"
       },
       "online-search": {
-        "placeholder": "没有可用的搜索索引。",
-        "title": "联网搜索结果"
+        "placeholder": "No search indices provided.",
+        "title": "Online search results"
       },
-      "open-preview": "打开预览",
+      "open-preview": "open preview",
       "progress": {
-        "prefix": "题目",
-        "suffix": "/ 共 {{total}} 题"
+        "prefix": "Problem",
+        "suffix": "of {{total}}"
       },
-      "source-image": "原始文件："
+      "source-image": "Source file:"
     },
     "solutions": {
-      "analyzing": "正在分析... 正在从你的图片中提取问题和解决方案",
+      "analyzing": "Analyzing... extracting problems and solutions from your images.",
       "export": {
-        "answer-label": "答案",
-        "button": "导出为 Markdown",
-        "document-title": "作业解答汇总",
+        "answer-label": "Answer",
+        "button": "Export as Markdown",
+        "document-title": "Homework Solutions",
         "empty": {
-          "description": "请先完成识别后再导出。",
-          "title": "暂无可导出的内容"
+          "description": "Run a scan and wait for results before exporting.",
+          "title": "Nothing to export"
         },
         "error": {
-          "description": "生成 Markdown 文件时出错，请重试。",
-          "title": "导出失败"
+          "description": "Something went wrong while creating the markdown file.",
+          "title": "Export failed"
         },
-        "explanation-label": "解析",
+        "explanation-label": "Explanation",
         "filename-prefix": "homework-solutions",
-        "page-heading": "第 {{index}} 页 · {{name}}",
+        "page-heading": "Page {{index}} · {{name}}",
         "placeholders": {
-          "answer": "_暂无答案。_",
-          "explanation": "_暂无解析。_",
-          "problem": "_暂无题干内容。_"
+          "answer": "_No answer provided._",
+          "explanation": "_No explanation provided._",
+          "problem": "_No problem content provided._"
         },
-        "problem-heading": "题目 {{index}}",
-        "problem-label": "题干",
+        "problem-heading": "Problem {{index}}",
+        "problem-label": "Problem",
         "success": {
-          "description": "解答文件已保存。",
-          "title": "Markdown 已下载"
+          "description": "Your solutions file is ready.",
+          "title": "Markdown downloaded"
         }
       },
-      "focus-region-aria": "解决方案键盘聚焦区域（Tab/Shift+Tab 切换题目，空格/Shift+空格切换图片）",
-      "gesture-hint": "左右滑动切换题目。",
-      "idle": "点击\"开始打滑\"将图片发送给AI以在这里查看结果",
-      "photo-label": "文件 {{index}} • {{source}}",
+      "focus-region-aria": "Solutions keyboard focus region (Tab/Shift+Tab for problems, Space/Shift+Space for images)",
+      "gesture-hint": "Swipe left or right to switch problems.",
+      "idle": "No solutions yet. Add images and click \"Let's Skid\" to see results here.",
+      "photo-label": "File {{index}} • {{source}}",
       "status": {
-        "failed": "处理失败，请重试。",
-        "pending": "正在处理中...",
-        "stream": "正在推理...",
-        "success": "这张图片没有检测到题目。",
-        "success-with-provider": "由 {{provider}} 处理成功。"
+        "failed": "Failed to process this image. Please try again.",
+        "pending": "Processing in progress...",
+        "stream": "Reasoning...",
+        "success": "No problems were detected for this image.",
+        "success-with-provider": "Solved by {{provider}}."
       },
       "streaming": {
-        "placeholder": "AI 正在思考...",
-        "title": "AI 输出"
+        "placeholder": "AI is thinking...",
+        "title": "AI Output"
       },
       "tabs": {
-        "fallback": "文件 {{index}}"
+        "fallback": "File {{index}}"
       },
-      "title": "解决方案",
-      "toggle-preview": "切换预览"
+      "title": "Solutions",
+      "toggle-preview": "Toggle Preview"
     },
     "sources": {
       "adb": "ADB",
-      "camera": "拍摄",
-      "upload": "本地上传"
+      "camera": "Camera",
+      "upload": "Upload"
     },
     "upload-area": {
-      "adb-connect": "ADB 连接",
-      "adb-connecting": "连接中...",
-      "adb-reconnect": "重新连接 ADB",
-      "adb-screenshot": "ADB 截图",
-      "adb-screenshot-busy": "采集中...",
-      "adb-screenshot-hint": "通过 ADB（WebUSB）从已连接的安卓设备捕获屏幕截图",
-      "camera-help-aria": "相机使用说明",
+      "adb-connect": "ADB Connect",
+      "adb-connecting": "Connecting...",
+      "adb-reconnect": "Reconnect ADB",
+      "adb-screenshot": "ADB Screenshot",
+      "adb-screenshot-busy": "Capturing...",
+      "adb-screenshot-hint": "Capture a screenshot from a connected Android device via ADB (WebUSB)",
+      "camera-help-aria": "Camera help",
       "camera-tip": {
-        "close": "知道了",
-        "intro": "「<takePhoto>拍照</takePhoto>」按钮会调用浏览器的原生相机选择器（<capture>capture=\"environment\"</capture>）。在手机上会直接打开相机，在桌面端通常会退回到文件选择窗口。",
-        "tips": ["尽量利用自然光线，避免眩光。", "让题目占满画面，保持文字清晰。", "一张照片拍一题，识别效果更好。"],
-        "title": "在不同的设备上拍摄照片"
+        "close": "Got it",
+        "intro": "The <takePhoto>Take Photo</takePhoto> button uses the browser's native camera picker (<capture>capture=\"environment\"</capture>). On phones, it opens the camera directly. On desktops, it usually falls back to the file chooser.",
+        "tips": ["Prefer natural light and avoid glare.", "Fill the frame with the problem. Keep text sharp.", "One question per shot yields better recognition."],
+        "title": "Taking photos on different devices"
       },
-      "pdf-disabled": "仅在启用 Gemini 源时支持 PDF 上传。",
-      "take-photo": "拍照",
+      "pdf-disabled": "PDF uploads are available only when a Gemini source is enabled.",
+      "take-photo": "Take Photo",
       "text-input": {
-        "button": "文本输入",
-        "description": "直接粘贴或输入题目内容。",
-        "placeholder": "在此输入题目...",
-        "submit": "确认",
-        "title": "输入题目文本"
+        "button": "Text Input",
+        "description": "Paste or type the problem content directly.",
+        "placeholder": "Enter problem here...",
+        "submit": "Confirm",
+        "title": "Input Problem Text"
       },
-      "upload": "上传文件",
-      "upload-tip": "支持图片；PDF 需要启用 Gemini 源。"
+      "upload": "Upload Files",
+      "upload-tip": "Images are supported. PDFs require an active Gemini source."
     },
     "uploads-info": {
-      "selected": "已选择"
+      "selected": "Selected"
     }
   }
 }
