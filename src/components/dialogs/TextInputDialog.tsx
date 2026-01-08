@@ -45,6 +45,7 @@ export const TextInputDialog = ({
 
   const handleSubmit = () => {
     onSubmit(inputValue);
+    setInputValue("");
   };
 
   const onKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (e) => {

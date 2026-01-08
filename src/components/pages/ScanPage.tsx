@@ -27,13 +27,13 @@ import { useTranslation } from "react-i18next";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { cn } from "@/lib/utils";
-// import { useRouter } from "next/navigation";
-// import { useShortcut } from "@/hooks/use-shortcut";
+import { useRouter } from "next/navigation";
+import { useShortcut } from "@/hooks/use-shortcut";
 import OpenCVLoader from "../OpenCVLoader";
 
 export default function ScanPage() {
   const { t } = useTranslation("commons", { keyPrefix: "scan-page" });
-  // const router = useRouter();
+  const router = useRouter();
   // Destructure all necessary state and new semantic actions from the store.
   const {
     imageItems: items,
@@ -80,17 +80,21 @@ export default function ScanPage() {
   const [activeTab, setActiveTab] = useState<"capture" | "preview">(
     items.length ? "preview" : "capture",
   );
-  const itemsRef = useRef(items);
+
+  useShortcut(
+    "openChat",
+    (event) => {
+      event.preventDefault();
+      router.push("/chat");
+    },
+    [router],
+  );
 
   useEffect(() => {
-    itemsRef.current = items;
-  }, [items]);
-
-  useEffect(() => {
-    return () => {
-      itemsRef.current.forEach((it) => URL.revokeObjectURL(it.url));
-    };
-  }, []);
+    if (!items.length) {
+      setActiveTab("capture");
+    }
+  }, [items.length]);
 
   // Memoized calculation of the total size of all uploaded files.
   const totalBytes = useMemo(
@@ -112,6 +116,16 @@ export default function ScanPage() {
       let rejectedPdf = false;
       const arr = Array.from(files).filter((f) => {
         if (f.type.startsWith("image/")) {
+          return true;
+        }
+
+        if (
+          f.type.startsWith("text/") ||
+          f.type === "application/json" ||
+          f.name.endsWith(".md") ||
+          f.name.endsWith(".json") ||
+          f.name.endsWith(".txt")
+        ) {
           return true;
         }
 

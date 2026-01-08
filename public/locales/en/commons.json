@@ -13,7 +13,7 @@
     "scan": "Let's Skid",
     "chat": "Chat",
     "settings": "Settings",
-    "title": "Add Images",
+    "title": "Add Homework",
     "global-traits": {
       "trigger": "Global Traits Editor",
       "title": "Edit Global Traits",
@@ -25,6 +25,7 @@
   "preview": {
     "drag-tip": "You can drag or paste your files to this panel.",
     "drag-tip-mobile": "Tap a card to zoom in. Swipe left or right to review everything.",
+    "supported-types": "Supports images, text, Markdown, JSON, etc.",
     "no-files": "No files yet. Upload or take a photo to begin.",
     "title": "Preview",
     "image-alt": "Homework preview",
@@ -164,7 +165,7 @@
     "tabs": {
       "fallback": "File {{index}}"
     },
-    "photo-label": "Photo {{index}} • {{source}}",
+    "photo-label": "File {{index}} • {{source}}",
     "toggle-preview": "Toggle Preview",
     "streaming": {
       "title": "AI Output",
@@ -202,6 +203,13 @@
     "take-photo": "Take Photo",
     "upload": "Upload Files",
     "upload-tip": "Images are supported. PDFs require an active Gemini source.",
+    "text-input": {
+      "button": "Text Input",
+      "title": "Input Problem Text",
+      "description": "Paste or type the problem content directly.",
+      "placeholder": "Enter problem here...",
+      "submit": "Confirm"
+    },
     "camera-help-aria": "Camera help",
     "camera-tip": {
       "title": "Taking photos on different devices",
@@ -529,13 +537,13 @@
         "description": "Please copy manually."
       }
     },
-    "source-image": "Source image:",
+    "source-image": "Source file:",
     "open-preview": "open preview",
     "navigation": {
       "prev-problem": "Prev",
       "next-problem": "Next",
-      "prev-image": "⟵ Image",
-      "next-image": "Image ⟶"
+      "prev-image": "⟵ File",
+      "next-image": "File ⟶"
     },
     "online-search": {
       "title": "Online search results",

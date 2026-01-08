@@ -1,4 +1,4 @@
-import { Camera, Upload, MoreVertical } from "lucide-react";
+import { Camera, Upload, FileText ,MoreVertical} from "lucide-react";
 import { Button } from "../ui/button";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../ui/dialog";
+import { TextInputDialog } from "../dialogs/TextInputDialog";
 import { useProblemsStore, type FileItem } from "@/store/problems-store";
 import { Trans, useTranslation } from "react-i18next";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -16,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { useShortcut } from "@/hooks/use-shortcut";
 import { ShortcutHint } from "../ShortcutHint";
 import { useNativeCamera } from "@/hooks/use-native-camera";
+import { generateTextFilename } from "@/utils/file-utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,11 +50,22 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
     null,
   );
   const [adbConnected, setAdbConnected] = useState(false);
+  const [textInputOpen, setTextInputOpen] = useState(false);
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const uploadBtnRef = useRef<HTMLButtonElement | null>(null);
   const cameraBtnRef = useRef<HTMLButtonElement | null>(null);
+
+  const handleTextInput = useCallback(
+    (text: string) => {
+      const filename = generateTextFilename(text);
+      const file = new File([text], filename, { type: "text/plain" });
+      appendFiles([file], "upload");
+      setTextInputOpen(false);
+    },
+    [appendFiles],
+  );
 
   const handleUploadBtnClicked = useCallback(() => {
     if (isWorking || adbBusy) return;
@@ -174,13 +187,16 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
     handleCameraBtnClicked,
   ]);
 
+
   const adbScreenshotShortcut = useShortcut(
     "adbScreenshot",
     () => handleAdbBtnClicked(),
     [handleAdbBtnClicked],
   );
 
-  const fileAccept = allowPdf ? "image/*,application/pdf" : "image/*";
+  const fileAccept = allowPdf
+    ? "image/*,application/pdf,text/*,.md,.json"
+    : "image/*,text/*,.md,.json";
 
   return (
     <>
@@ -255,6 +271,42 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
           </span>
           {!isCompact && <ShortcutHint shortcut={cameraShortcut} />}
         </Button>
+        <TextInputDialog
+          isOpen={textInputOpen}
+          onOpenChange={setTextInputOpen}
+          title={t("text-input.title")}
+          description={t("text-input.description")}
+          placeholder={t("text-input.placeholder")}
+          submitText={t("text-input.submit")}
+          onSubmit={handleTextInput}
+          trigger={
+            <Button
+              variant="secondary"
+              className={cn(
+                "flex-1 items-center justify-between",
+                isCompact && "py-6 text-base font-medium",
+              )}
+              size={isCompact ? "lg" : "default"}
+              disabled={isWorking}
+            >
+              <span className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                {t("text-input.button")}
+              </span>
+            </Button>
+          }
+        />
+        {/* <Button */}
+        {/*   variant="ghost" */}
+        {/*   size="icon" */}
+        {/*   onClick={() => setCameraTipOpen(true)} */}
+        {/*   aria-label={t("camera-help-aria")} */}
+        {/*   className={cn( */}
+        {/*     isCompact && "h-12 w-12 rounded-xl border border-border/40", */}
+        {/*   )} */}
+        {/* > */}
+        {/*   <Info className="h-4 w-4" /> */}
+        {/* </Button> */}
       </div>
       {!isCompact && (
         <div className="flex gap-2">
