@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import ShortcutRecorder from "../ShortcutRecorder";
 import { useTheme } from "../theme-provider";
 import { Button } from "../ui/button";
@@ -80,6 +81,7 @@ export default function SettingsPage() {
   const { t, i18n } = useTranslation("commons", {
     keyPrefix: "settings-page",
   });
+  const isMobileLayout = useMediaQuery("(max-width: 640px)");
 
   const searchParams = useSearchParams();
 
@@ -230,6 +232,13 @@ export default function SettingsPage() {
         label: translateSettings("shortcuts.actions.camera.label"),
         description: translateSettings("shortcuts.actions.camera.description"),
       },
+      !isMobileLayout && {
+        action: "adbScreenshot" as ShortcutAction,
+        label: translateSettings("shortcuts.actions.adbScreenshot.label"),
+        description: translateSettings(
+          "shortcuts.actions.adbScreenshot.description",
+        ),
+      },
       {
         action: "startScan" as ShortcutAction,
         label: translateSettings("shortcuts.actions.startScan.label"),
@@ -267,8 +276,12 @@ export default function SettingsPage() {
           "shortcuts.actions.open-global-traits-editor.description",
         ),
       },
-    ];
-  }, [translateSettings]);
+    ].filter(Boolean) as Array<{
+      action: ShortcutAction;
+      label: string;
+      description: string;
+    }>;
+  }, [translateSettings, isMobileLayout]);
 
   const shortcutsTitle = translateSettings("shortcuts.title");
   const shortcutsDesc = translateSettings("shortcuts.desc");

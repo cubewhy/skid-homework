@@ -213,7 +213,13 @@
       ],
       "close": "Got it"
     },
-    "pdf-disabled": "PDF uploads are available only when a Gemini source is enabled."
+    "pdf-disabled": "PDF uploads are available only when a Gemini source is enabled.",
+    "adb-connect": "ADB Connect",
+    "adb-reconnect": "Reconnect ADB",
+    "adb-screenshot": "ADB Screenshot",
+    "adb-connecting": "Connecting...",
+    "adb-screenshot-busy": "Capturing...",
+    "adb-screenshot-hint": "Capture a screenshot from a connected Android device via ADB (WebUSB)"
   },
   "uploads-info": {
     "selected": "Selected"
@@ -328,6 +334,10 @@
         "camera": {
           "label": "Take photo",
           "description": "Launches the device camera to capture homework."
+        },
+        "adbScreenshot": {
+          "label": "ADB screenshot",
+          "description": "Capture the connected Android device's screen via ADB."
         },
         "startScan": {
           "label": "Start scan",
@@ -595,6 +605,7 @@
   },
   "sources": {
     "upload": "Upload",
-    "camera": "Camera"
+    "camera": "Camera",
+    "adb": "ADB"
   }
 }

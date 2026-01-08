@@ -2,7 +2,7 @@
 import { toast } from "sonner";
 import { v4 as uuidv4 } from "uuid";
 import { Info, StarIcon } from "lucide-react";
-import { useEffect, useMemo, useCallback, useState } from "react";
+import { useEffect, useMemo, useCallback, useState, useRef } from "react";
 import { useAiStore } from "@/store/ai-store";
 import ActionsCard from "../cards/ActionsCard";
 import PreviewCard from "../cards/PreviewCard";
@@ -27,13 +27,13 @@ import { useTranslation } from "react-i18next";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { cn } from "@/lib/utils";
-import { useRouter } from "next/navigation";
-import { useShortcut } from "@/hooks/use-shortcut";
+// import { useRouter } from "next/navigation";
+// import { useShortcut } from "@/hooks/use-shortcut";
 import OpenCVLoader from "../OpenCVLoader";
 
 export default function ScanPage() {
   const { t } = useTranslation("commons", { keyPrefix: "scan-page" });
-  const router = useRouter();
+  // const router = useRouter();
   // Destructure all necessary state and new semantic actions from the store.
   const {
     imageItems: items,
@@ -80,28 +80,17 @@ export default function ScanPage() {
   const [activeTab, setActiveTab] = useState<"capture" | "preview">(
     items.length ? "preview" : "capture",
   );
-
-  useShortcut(
-    "openChat",
-    (event) => {
-      event.preventDefault();
-      router.push("/chat");
-    },
-    [router],
-  );
+  const itemsRef = useRef(items);
 
   useEffect(() => {
-    if (!items.length) {
-      setActiveTab("capture");
-    }
-  }, [items.length]);
+    itemsRef.current = items;
+  }, [items]);
 
-  // Effect hook to clean up object URLs when the component unmounts or items change.
   useEffect(() => {
     return () => {
-      items.forEach((it) => URL.revokeObjectURL(it.url));
+      itemsRef.current.forEach((it) => URL.revokeObjectURL(it.url));
     };
-  }, [items]);
+  }, []);
 
   // Memoized calculation of the total size of all uploaded files.
   const totalBytes = useMemo(

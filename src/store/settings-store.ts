@@ -6,6 +6,7 @@ export type LanguagePreference = "en" | "zh";
 export type ShortcutAction =
   | "upload"
   | "camera"
+  | "adbScreenshot"
   | "startScan"
   | "clearAll"
   | "openSettings"
@@ -22,6 +23,7 @@ const DEFAULT_SHORTCUTS: ShortcutMap = {
   startScan: "ctrl+3",
   clearAll: "ctrl+4",
   openSettings: "ctrl+5",
+  adbScreenshot: "ctrl+6",
   openChat: "ctrl+e",
   openGlobalTraitsEditor: "ctrl+x",
 };

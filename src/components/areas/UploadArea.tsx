@@ -1,6 +1,7 @@
-import { Camera, Upload } from "lucide-react";
+import { Camera, Upload, MoreVertical } from "lucide-react";
 import { Button } from "../ui/button";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import {
   Dialog,
   DialogContent,
@@ -15,6 +16,17 @@ import { cn } from "@/lib/utils";
 import { useShortcut } from "@/hooks/use-shortcut";
 import { ShortcutHint } from "../ShortcutHint";
 import { useNativeCamera } from "@/hooks/use-native-camera";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
+import {
+  captureAdbScreenshot,
+  isAdbDeviceConnected,
+  reconnectAdbDevice,
+} from "@/lib/webadb/screenshot";
 
 export type UploadAreaProps = {
   appendFiles: (files: File[] | FileList, source: FileItem["source"]) => void;
@@ -31,6 +43,11 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
   const isWorking = useProblemsStore((s) => s.isWorking);
   // const [isDragging, setIsDragging] = useState(false);
   const [cameraTipOpen, setCameraTipOpen] = useState(false);
+  const [adbBusy, setAdbBusy] = useState(false);
+  const [adbBusyMode, setAdbBusyMode] = useState<"connect" | "capture" | null>(
+    null,
+  );
+  const [adbConnected, setAdbConnected] = useState(false);
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
@@ -38,13 +55,13 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
   const cameraBtnRef = useRef<HTMLButtonElement | null>(null);
 
   const handleUploadBtnClicked = useCallback(() => {
-    if (isWorking) return;
+    if (isWorking || adbBusy) return;
     uploadInputRef.current?.click();
-  }, [isWorking]);
+  }, [isWorking, adbBusy]);
 
   const { isNative, capture } = useNativeCamera();
   const runCameraFlow = useCallback(async () => {
-    if (isWorking) return;
+    if (isWorking || adbBusy) return;
     if (isNative) {
       const files = await capture();
       if (files.length) {
@@ -53,11 +70,101 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
       }
     }
     cameraInputRef.current?.click();
-  }, [appendFiles, capture, isNative, isWorking]);
+  }, [appendFiles, capture, isNative, isWorking, adbBusy]);
 
   const handleCameraBtnClicked = useCallback(() => {
     void runCameraFlow();
   }, [runCameraFlow]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const updateAdbStatus = async () => {
+      try {
+        const connected = await isAdbDeviceConnected();
+        if (!cancelled) setAdbConnected(connected);
+      } catch (error) {
+        console.error("ADB status check failed", error);
+        if (!cancelled) setAdbConnected(false);
+      }
+    };
+
+    const usb =
+      typeof navigator !== "undefined" && "usb" in navigator
+        ? (navigator as Navigator & {
+            usb?: {
+              addEventListener: typeof window.addEventListener;
+              removeEventListener: typeof window.removeEventListener;
+            };
+          }).usb
+        : undefined;
+
+    void updateAdbStatus();
+
+    if (usb) {
+      const handleUsbChange = () => {
+        void updateAdbStatus();
+      };
+
+      usb.addEventListener("connect", handleUsbChange);
+      usb.addEventListener("disconnect", handleUsbChange);
+
+      return () => {
+        cancelled = true;
+        usb.removeEventListener("connect", handleUsbChange);
+        usb.removeEventListener("disconnect", handleUsbChange);
+      };
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdbDeviceConnected]);
+
+  const handleAdbReconnect = useCallback(async () => {
+    if (!adbConnected || isWorking || adbBusy) return;
+    try {
+      setAdbBusy(true);
+      setAdbBusyMode("connect");
+      const ok = await reconnectAdbDevice();
+      setAdbConnected(ok);
+    } catch (error) {
+      console.error("ADB reconnect failed", error);
+      setAdbConnected(false);
+    } finally {
+      setAdbBusy(false);
+      setAdbBusyMode(null);
+    }
+  }, [adbBusy, adbConnected, isWorking, reconnectAdbDevice]);
+
+  const handleAdbBtnClicked = useCallback(async () => {
+    if (isWorking || adbBusy) return;
+    try {
+      setAdbBusy(true);
+      if (!adbConnected) {
+        setAdbBusyMode("connect");
+        const ok = await reconnectAdbDevice();
+        setAdbConnected(ok);
+      } else {
+        setAdbBusyMode("capture");
+        const file = await captureAdbScreenshot();
+        appendFiles([file], "adb");
+      }
+    } catch (err) {
+      console.error("ADB operation failed", err);
+      // On failure we keep current adbConnected state as-is
+    } finally {
+      setAdbBusy(false);
+      setAdbBusyMode(null);
+    }
+  }, [
+    adbBusy,
+    adbConnected,
+    appendFiles,
+    captureAdbScreenshot,
+    isWorking,
+    reconnectAdbDevice,
+  ]);
 
   const uploadShortcut = useShortcut("upload", () => handleUploadBtnClicked(), [
     handleUploadBtnClicked,
@@ -66,6 +173,12 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
   const cameraShortcut = useShortcut("camera", () => handleCameraBtnClicked(), [
     handleCameraBtnClicked,
   ]);
+
+  const adbScreenshotShortcut = useShortcut(
+    "adbScreenshot",
+    () => handleAdbBtnClicked(),
+    [handleAdbBtnClicked],
+  );
 
   const fileAccept = allowPdf ? "image/*,application/pdf" : "image/*";
 
@@ -101,7 +214,7 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
           )}
           size={isCompact ? "lg" : "default"}
           ref={uploadBtnRef}
-          disabled={isWorking}
+          disabled={isWorking || adbBusy}
           onClick={handleUploadBtnClicked}
         >
           <span className="flex items-center gap-2">
@@ -114,7 +227,7 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
       <div className={cn("flex gap-2", isCompact && "flex-col")}>
         <input
           ref={cameraInputRef}
-          disabled={isWorking}
+          disabled={isWorking || adbBusy}
           type="file"
           accept={fileAccept}
           capture="environment"
@@ -133,7 +246,7 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
             isCompact && "py-6 text-base font-medium",
           )}
           size={isCompact ? "lg" : "default"}
-          disabled={isWorking}
+          disabled={isWorking || adbBusy}
           onClick={handleCameraBtnClicked}
         >
           <span className="flex items-center gap-2">
@@ -142,18 +255,59 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
           </span>
           {!isCompact && <ShortcutHint shortcut={cameraShortcut} />}
         </Button>
-        {/* <Button */}
-        {/*   variant="ghost" */}
-        {/*   size="icon" */}
-        {/*   onClick={() => setCameraTipOpen(true)} */}
-        {/*   aria-label={t("camera-help-aria")} */}
-        {/*   className={cn( */}
-        {/*     isCompact && "h-12 w-12 rounded-xl border border-border/40", */}
-        {/*   )} */}
-        {/* > */}
-        {/*   <Info className="h-4 w-4" /> */}
-        {/* </Button> */}
       </div>
+      {!isCompact && (
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            className="flex-1 items-center min-w-0 justify-between"
+            size="default"
+            disabled={isWorking || adbBusy}
+            onClick={handleAdbBtnClicked}
+            title={t("adb-screenshot-hint")}
+          >
+            <span className="flex items-center gap-1.5 min-w-0">
+              <Image
+                src="/icons/adb.svg"
+                alt="ADB"
+                width={18}
+                height={18}
+                className="h-[18px] w-[18px]"
+              />
+              <span className="truncate">
+                {adbBusy
+                  ? adbBusyMode === "capture"
+                    ? t("adb-screenshot-busy")
+                    : t("adb-connecting")
+                  : adbConnected
+                    ? t("adb-screenshot")
+                    : t("adb-connect")}
+              </span>
+            </span>
+            <ShortcutHint shortcut={adbScreenshotShortcut} />
+          </Button>
+          {adbConnected && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="px-3"
+                  disabled={isWorking || adbBusy}
+                  aria-label="ADB menu"
+                >
+                  <MoreVertical className="h-5 w-5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-[10rem]">
+                <DropdownMenuItem onClick={handleAdbReconnect}>
+                  {t("adb-reconnect")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+      )}
       {/* Camera help dialog */}
       <Dialog open={cameraTipOpen} onOpenChange={setCameraTipOpen}>
         <DialogContent className="sm:max-w-md">
