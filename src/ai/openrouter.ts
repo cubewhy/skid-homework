@@ -180,6 +180,7 @@ export class OpenRouterClient {
       ? { plugins: [{ id: "web" }] }
       : undefined;
 
+    // @ts-ignore
     const stream = await this.client.chat.completions.create({
       model,
       messages,

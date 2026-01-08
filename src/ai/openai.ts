@@ -181,7 +181,7 @@ export class OpenAiClient {
      */
     private async _executeResponsesStream(
         model: string,
-        messages,
+        messages:any,
         callback?: (text: string) => void,
         options?: { onlineSearch?: boolean },
     ): Promise<string> {
@@ -195,6 +195,7 @@ export class OpenAiClient {
         try {
             stream = (await this.client.responses.create({
                 model,
+                // @ts-ignore
                 tools: toolsUsed,
                 stream: true,
                 input: messages
@@ -222,7 +223,9 @@ export class OpenAiClient {
         for await (const event of stream) {
             // type: 'response.output_text.delta'
             // delta: 'text'
+            // @ts-ignore
             if (event.type === 'response.output_text.delta') {
+                // @ts-ignore
                 const delta = event.delta;
 
                 if (delta) {
