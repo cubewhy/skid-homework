@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import type { AiChatMessage } from "./chat-types";
+import { base64ToUtf8 } from "@/utils/encoding";
 
 export type OpenAiModel = {
   name: string;
@@ -73,13 +74,25 @@ export class OpenAiClient {
       });
     }
 
-    contentParts.push({
-      type: "image_url",
-      image_url: {
-        url: `data:${mimeType};base64,${media}`,
-        detail: "auto",
-      },
-    });
+    if (mimeType.startsWith("image/")) {
+      contentParts.push({
+        type: "image_url",
+        image_url: {
+          url: `data:${mimeType};base64,${media}`,
+          detail: "auto",
+        },
+      });
+    } else {
+      try {
+        const text = base64ToUtf8(media);
+        contentParts.push({
+          type: "text",
+          text: `\n\n[File Content]\n${text}\n\n`,
+        });
+      } catch (e) {
+        console.error("Failed to decode base64 text", e);
+      }
+    }
 
     messages.push({
       role: "user",

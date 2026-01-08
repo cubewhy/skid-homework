@@ -13,7 +13,7 @@
     "scan": "开始打滑",
     "chat": "聊天",
     "settings": "设置",
-    "title": "上传照片",
+    "title": "添加作业",
     "global-traits": {
       "trigger": "全局提示词编辑器",
       "title": "编辑全局提示词",
@@ -25,9 +25,10 @@
   "preview": {
     "drag-tip": "你可以把文件拖动到这个窗口中, 或者粘贴屏幕截图",
     "drag-tip-mobile": "轻触卡片即可放大，左右滑动快速浏览。",
+    "supported-types": "支持图片、文本、Markdown、JSON 等格式",
     "no-files": "没有文件 上传或拍照以开始",
     "title": "预览",
-    "image-alt": "作业预览图",
+    "image-alt": "作业预览",
     "file-type": {
       "pdf": "PDF",
       "unknown": "未知类型"
@@ -160,7 +161,7 @@
     "tabs": {
       "fallback": "文件 {{index}}"
     },
-    "photo-label": "照片 {{index}} • {{source}}",
+    "photo-label": "文件 {{index}} • {{source}}",
     "toggle-preview": "切换预览",
     "streaming": {
       "title": "AI 输出",
@@ -198,6 +199,13 @@
     "take-photo": "拍照",
     "upload": "上传文件",
     "upload-tip": "支持图片；PDF 需要启用 Gemini 源。",
+    "text-input": {
+      "button": "文本输入",
+      "title": "输入题目文本",
+      "description": "直接粘贴或输入题目内容。",
+      "placeholder": "在此输入题目...",
+      "submit": "确认"
+    },
     "camera-help-aria": "相机使用说明",
     "camera-tip": {
       "title": "在不同的设备上拍摄照片",
@@ -510,13 +518,13 @@
         "description": "请手动复制。"
       }
     },
-    "source-image": "原始图片：",
+    "source-image": "原始文件：",
     "open-preview": "打开预览",
     "navigation": {
       "prev-problem": "上一题",
       "next-problem": "下一题",
-      "prev-image": "⟵ 图片",
-      "next-image": "图片 ⟶"
+      "prev-image": "⟵ 文件",
+      "next-image": "文件 ⟶"
     },
     "chat": {
       "button": "与 AI 聊聊",

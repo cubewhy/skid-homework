@@ -94,13 +94,6 @@ export default function ScanPage() {
     }
   }, [items.length]);
 
-  // Effect hook to clean up object URLs when the component unmounts or items change.
-  useEffect(() => {
-    return () => {
-      items.forEach((it) => URL.revokeObjectURL(it.url));
-    };
-  }, [items]);
-
   // Memoized calculation of the total size of all uploaded files.
   const totalBytes = useMemo(
     () => items.reduce((sum, it) => sum + it.file.size, 0),
@@ -121,6 +114,16 @@ export default function ScanPage() {
       let rejectedPdf = false;
       const arr = Array.from(files).filter((f) => {
         if (f.type.startsWith("image/")) {
+          return true;
+        }
+
+        if (
+          f.type.startsWith("text/") ||
+          f.type === "application/json" ||
+          f.name.endsWith(".md") ||
+          f.name.endsWith(".json") ||
+          f.name.endsWith(".txt")
+        ) {
           return true;
         }
 

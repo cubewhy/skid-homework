@@ -19,6 +19,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   type KeyboardEvent,
 } from "react";
 import {
@@ -36,13 +37,86 @@ import { useTranslation } from "react-i18next";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useDrag } from "@use-gesture/react";
 import { animated, to, useSpring } from "@react-spring/web";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Maximize2 } from "lucide-react";
 import { toast } from "sonner";
+import { readTextFile } from "@/utils/file-utils";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "../ui/dialog";
 
 export interface OrderedSolution {
   item: FileItem;
   solutions: Solution;
 }
+
+const TextSolutionPreview = ({
+  item,
+  t,
+  tCommon,
+  idx,
+}: {
+  item: FileItem;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  t: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tCommon: any;
+  idx: number;
+}) => {
+  const [content, setContent] = useState<string>("");
+
+  useEffect(() => {
+    readTextFile(item.url).then(setContent);
+  }, [item.url]);
+
+  return (
+    <Collapsible defaultOpen>
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-slate-400">
+          {t("photo-label", {
+            index: idx + 1,
+            source: tCommon(`sources.${item.source}`),
+          })}
+        </div>
+        <div className="flex gap-2">
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7">
+                <Maximize2 className="h-4 w-4" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="flex h-[80vh] max-w-4xl flex-col">
+              <DialogHeader>
+                <DialogTitle>
+                  {t("photo-label", {
+                    index: idx + 1,
+                    source: tCommon(`sources.${item.source}`),
+                  })}
+                </DialogTitle>
+              </DialogHeader>
+              <div className="flex-1 overflow-auto rounded-md bg-slate-950 p-4 font-mono text-sm text-slate-300 whitespace-pre-wrap">
+                {content}
+              </div>
+            </DialogContent>
+          </Dialog>
+          <CollapsibleTrigger asChild>
+            <Button variant="outline" size="sm" className="h-7 px-2">
+              {t("toggle-preview")}
+            </Button>
+          </CollapsibleTrigger>
+        </div>
+      </div>
+      <CollapsibleContent className="mt-2">
+        <div className="max-h-96 overflow-hidden overflow-y-auto rounded-xl border border-slate-700 bg-slate-950 p-4 text-xs font-mono text-slate-300 whitespace-pre-wrap break-all">
+          {content}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+};
 
 export default function SolutionsArea() {
   const { t } = useTranslation("commons", { keyPrefix: "solutions" });
@@ -442,7 +516,7 @@ export default function SolutionsArea() {
                         onKeyDown={handleKeyDown}
                       >
                         {/* Collapsible preview of the current photo. */}
-                        {entry.item.mimeType.startsWith("image/") && (
+                        {entry.item.mimeType.startsWith("image/") ? (
                           <Collapsible defaultOpen>
                             <div className="flex items-center justify-between">
                               <div className="text-xs text-slate-400">
@@ -478,6 +552,13 @@ export default function SolutionsArea() {
                               </div>
                             </CollapsibleContent>
                           </Collapsible>
+                        ) : (
+                          <TextSolutionPreview
+                            item={entry.item}
+                            t={t}
+                            tCommon={tCommon}
+                            idx={idx}
+                          />
                         )}
 
                         {(entry.solutions.status !== "success" ||

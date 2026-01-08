@@ -7,9 +7,16 @@ import { ScrollArea } from "../ui/scroll-area";
 import { Badge } from "../ui/badge";
 import { twMerge } from "tailwind-merge";
 import type { FileItem, FileStatus } from "@/store/problems-store";
-import { useCallback, useState, type ClipboardEvent } from "react";
+import {
+  useCallback,
+  useState,
+  type ClipboardEvent,
+  useRef,
+  useEffect,
+} from "react";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import { generateTextFilename, readTextFile } from "@/utils/file-utils";
 
 export type PreviewCardProps = {
   items: FileItem[];
@@ -31,6 +38,20 @@ function getColorClassByStatus(status: FileStatus) {
   }
 }
 
+const TextFilePreview = ({ url }: { url: string }) => {
+  const [content, setContent] = useState<string>("");
+
+  useEffect(() => {
+    readTextFile(url).then((text) => setContent(text.slice(0, 300)));
+  }, [url]);
+
+  return (
+    <div className="h-40 w-full overflow-hidden bg-muted/50 p-3 text-[10px] font-mono text-muted-foreground break-all whitespace-pre-wrap">
+      {content}
+    </div>
+  );
+};
+
 export default function PreviewCard({
   items,
   removeItem,
@@ -41,15 +62,50 @@ export default function PreviewCard({
   const { t: tCommon } = useTranslation("commons");
 
   const [isDragging, setIsDragging] = useState(false);
+  const dragCounter = useRef(0);
   const isMobileLayout = layout === "mobile";
+
+  const onDragEnter = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      if (isMobileLayout) return;
+      dragCounter.current++;
+      if (dragCounter.current === 1) {
+        setIsDragging(true);
+      }
+    },
+    [isMobileLayout],
+  );
+
+  const onDragLeave = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      if (isMobileLayout) return;
+      dragCounter.current--;
+      if (dragCounter.current === 0) {
+        setIsDragging(false);
+      }
+    },
+    [isMobileLayout],
+  );
 
   const onDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
       e.preventDefault();
       if (isMobileLayout) return;
+      dragCounter.current = 0;
       setIsDragging(false);
       if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
         appendFiles(e.dataTransfer.files, "upload");
+      } else {
+        const text = e.dataTransfer.getData("text/plain");
+        if (text) {
+          const filename = generateTextFilename(text);
+          const file = new File([text], filename, {
+            type: "text/plain",
+          });
+          appendFiles([file], "upload");
+        }
       }
     },
     [appendFiles, isMobileLayout],
@@ -58,15 +114,26 @@ export default function PreviewCard({
   // const preventTyping = (e: KeyboardEvent) => {
   //   // 2. Allow modifier keys like Ctrl, Shift, etc., but block everything else.
   //   // This ensures that Ctrl+V (paste) still works.
-  //   if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-  //     e.preventDefault();
-  //   }
+  //   // if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+  //   //   e.preventDefault();
+  //   // }
   // };
 
   const handlePaste = (e: ClipboardEvent) => {
     e.preventDefault();
     if (!e.clipboardData) return;
-    appendFiles(e.clipboardData.files, "upload");
+    if (e.clipboardData.files.length > 0) {
+      appendFiles(e.clipboardData.files, "upload");
+    } else {
+      const text = e.clipboardData.getData("text");
+      if (text) {
+        const filename = generateTextFilename(text);
+        const file = new File([text], filename, {
+          type: "text/plain",
+        });
+        appendFiles([file], "upload");
+      }
+    }
   };
 
   return (
@@ -78,7 +145,7 @@ export default function PreviewCard({
         suppressContentEditableWarning
         // onKeyDown={preventTyping}
         className={cn(
-          "md:col-span-2 border-white/10 backdrop-blur outline-none caret-transparent cursor-default",
+          "md:col-span-2 border-white/10 backdrop-blur outline-none caret-transparent cursor-default flex flex-col",
           isMobileLayout &&
             "border border-white/20 bg-background/70 shadow-lg backdrop-blur-lg",
         )}
@@ -94,26 +161,23 @@ export default function PreviewCard({
           </CardTitle>
         </CardHeader>
         <CardContent
-          className="flex flex-col gap-2"
-          onDragOver={(e) => {
-            if (isMobileLayout) return;
-            e.preventDefault();
-            setIsDragging(true);
-          }}
-          onDragLeave={() => !isMobileLayout && setIsDragging(false)}
+          className="flex flex-col gap-2 flex-1"
+          onDragEnter={onDragEnter}
+          onDragOver={(e) => e.preventDefault()}
+          onDragLeave={onDragLeave}
+          onDrop={onDrop}
         >
           {items.length === 0 ? (
             <div
               className={cn(
-                "flex flex-col items-center justify-center rounded-lg border text-slate-400",
+                "flex flex-col items-center justify-center rounded-lg border text-slate-400 flex-1",
                 isMobileLayout
                   ? "h-48 border-white/20 bg-muted/30 px-6 text-center text-base"
-                  : "h-64 border-dashed",
+                  : "min-h-[16rem] border-dashed",
                 isDragging && !isMobileLayout
                   ? "border-indigo-400 bg-indigo-500/10"
                   : "border-white/15",
               )}
-              onDrop={onDrop}
             >
               <ImageIcon className="mb-2 h-6 w-6" />
               <p className="text-sm">
@@ -126,6 +190,11 @@ export default function PreviewCard({
                   ? t("drag-tip-mobile", { defaultValue: t("drag-tip") })
                   : t("drag-tip")}
               </p>
+              {!isMobileLayout && (
+                <p className="mt-2 text-xs text-slate-500">
+                  {t("supported-types")}
+                </p>
+              )}
             </div>
           ) : (
             <PhotoProvider>
@@ -138,7 +207,6 @@ export default function PreviewCard({
                         "group relative flex h-64 min-w-[72vw] flex-col overflow-hidden rounded-2xl border border-white/15 bg-background/80 shadow-sm",
                         getColorClassByStatus(it.status),
                       )}
-                      onDrop={onDrop}
                     >
                       {it.mimeType.startsWith("image/") ? (
                         <PhotoView src={it.url}>
@@ -148,6 +216,9 @@ export default function PreviewCard({
                             className="h-48 w-full cursor-pointer object-cover"
                           />
                         </PhotoView>
+                      ) : it.mimeType.startsWith("text/") ||
+                        it.file.name.match(/\.(md|json|txt)$/i) ? (
+                        <TextFilePreview url={it.url} />
                       ) : (
                         <div className="flex h-48 w-full select-none items-center justify-center text-sm">
                           {it.mimeType === "application/pdf"
@@ -164,7 +235,7 @@ export default function PreviewCard({
                         </Badge>
                       </figcaption>
                       <button
-                        className="absolute right-3 top-3 rounded-full bg-black/40 p-2 text-white/90 backdrop-blur transition hover:bg-black/60"
+                        className="absolute right-3 top-3 rounded-full bg-black/40 p-2 text-white/90 backdrop-blur transition hover:bg-black/60 cursor-pointer"
                         onClick={() => removeItem(it.id)}
                         aria-label={t("remove-aria")}
                       >
@@ -182,7 +253,6 @@ export default function PreviewCard({
                         ? "border-indigo-400 bg-indigo-500/10"
                         : "border-white/15",
                     )}
-                    onDrop={onDrop}
                   >
                     {items.map((it) => (
                       <figure
@@ -200,6 +270,9 @@ export default function PreviewCard({
                               className="h-40 w-full cursor-pointer object-cover"
                             />
                           </PhotoView>
+                        ) : it.mimeType.startsWith("text/") ||
+                          it.file.name.match(/\.(md|json|txt)$/i) ? (
+                          <TextFilePreview url={it.url} />
                         ) : (
                           <div className="flex h-40 w-full select-none items-center justify-center">
                             {it.mimeType === "application/pdf"
@@ -216,7 +289,7 @@ export default function PreviewCard({
                           </Badge>
                         </figcaption>
                         <button
-                          className="absolute right-2 top-2 hidden rounded-md bg-black/40 p-1 text-white/90 backdrop-blur transition group-hover:block"
+                          className="absolute right-2 top-2 hidden rounded-md bg-black/40 p-1 text-white/90 backdrop-blur transition group-hover:block cursor-pointer"
                           onClick={() => removeItem(it.id)}
                           aria-label={t("remove-aria")}
                         >
@@ -235,7 +308,9 @@ export default function PreviewCard({
               className="flex h-64 flex-col items-center justify-center rounded-lg border border-dashed text-slate-400 border-red-500 bg-red-500/10"
               onDrop={(e) => {
                 e.preventDefault();
+                e.stopPropagation();
                 setIsDragging(false);
+                dragCounter.current = 0;
               }}
             >
               <Trash2 />
