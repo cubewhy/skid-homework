@@ -147,10 +147,12 @@ interface Resources {
         },
         "api-hint": "在 <link>Google AI Studio</link> 申请 API Key。",
         "api-hint-openai": "在 <link>OpenAI 控制台</link> 申请 API Key。",
+        "api-hint-openrouter": "在 <link>OpenRouter Keys</link> 申请 API Key。",
         "key-placeholder": "{{provider}} API 密钥",
         "provider": {
           "label": "AI 提供商"
         },
+        "skip": "稍后再设置 API 密钥",
         "storage-note": "我们使用加密浏览器存储在本地保存你的密钥，绝不会上传到服务器。",
         "submit": "帮我省时间！"
       },
@@ -351,6 +353,7 @@ interface Resources {
           "search": "搜索模型...",
           "unknown": "未知模型（{{name}}）"
         },
+        "show-selector-in-scanner": "在扫描界面显示模型选择以快速切换模型",
         "title": "模型配置"
       },
       "openai": {
@@ -437,7 +440,8 @@ interface Resources {
         "option": "{{name}} • {{provider}}",
         "providers": {
           "gemini": "Gemini",
-          "openai": "OpenAI"
+          "openai": "OpenAI",
+          "openrouter": "OpenRouter"
         },
         "remove": {
           "error": "至少保留一个 AI 源。",
@@ -459,6 +463,7 @@ interface Resources {
         "desc": "针对支持的提供商调整高级思考设置。",
         "online-search": {
           "desc": "在需要时允许助手调用联网搜索工具。",
+          "show-toggle-in-scanner": "在扫描界面显示联网搜索按钮以快速切换",
           "title": "联网搜索",
           "toggle": "启用联网搜索"
         },

@@ -184,7 +184,6 @@ export class OpenRouterClient {
       model,
       messages,
       stream: true,
-      // @ts-expect-error OpenRouter specific parameter
       extra_body: extraBody,
     });
 

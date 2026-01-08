@@ -108,8 +108,7 @@ export class OpenAiClient {
     async sendChat(
         messages: AiChatMessage[],
         model = "gpt-4o",
-        callback?: (text: string) => void,
-        options?: { onlineSearch?: boolean },
+        callback?: (text: string) => void
     ) {
         const openAiMessages: ChatCompletionMessageParam[] = [];
 
