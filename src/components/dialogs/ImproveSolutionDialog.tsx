@@ -15,6 +15,7 @@ import { TextInputDialog } from "./TextInputDialog";
 import improvePrompt from "../../ai/prompts/improve.prompt.md";
 import diagramToolPrompt from "@/ai/prompts/tools/diagram-tool.prompt.md";
 import mermaidToolPrompt from "@/ai/prompts/tools/mermaid-tool.prompt.md";
+import { useSettingsStore } from "@/store/settings-store";
 
 export type ImproveSolutionDialogProps = {
   entry: OrderedSolution;
@@ -57,6 +58,7 @@ export const ImproveSolutionDialog = forwardRef<
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [isImproving, setImproving] = useState(false);
+  const onlineSearchEnabled = useSettingsStore((s) => s.onlineSearchEnabled);
 
   const handleImproveSolution = async (improveSolutionPrompt: string) => {
     if (!activeProblem) return;
@@ -116,6 +118,7 @@ ${source.traits}
             prompt,
             source.model,
             (text) => appendStreamedOutput(entry.item.url, text),
+            { onlineSearch: onlineSearchEnabled },
           );
 
           const res = parseImproveResponse(resText);

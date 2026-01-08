@@ -33,6 +33,7 @@ export interface ProblemSolution {
   answer: string;
   explanation: string; // The full raw markdown
   steps: ExplanationStep[]; // Parsed steps
+  onlineSearch?: string; // Raw ONLINE_SEARCH section content
 }
 
 // The interface for our store's state and actions.

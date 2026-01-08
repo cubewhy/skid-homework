@@ -41,12 +41,14 @@ export interface AiClient {
     prompt?: string,
     model?: string,
     callback?: (text: string) => void,
+    options?: { onlineSearch?: boolean },
   ) => Promise<string>;
   getAvailableModels?: () => Promise<AiModelSummary[]>;
   sendChat?: (
     messages: AiChatMessage[],
     model?: string,
     callback?: (text: string) => void,
+    options?: { onlineSearch?: boolean },
   ) => Promise<string>;
 }
 

@@ -140,6 +140,11 @@ export function parseSolveResponse(response: string): SolveResponse {
     const problemText = sections["PROBLEM_TEXT"] || "";
     const explanation = sections["EXPLANATION"] || "";
     const answer = sections["ANSWER"] || "";
+    const hasOnlineSearch = Object.prototype.hasOwnProperty.call(
+      sections,
+      "ONLINE_SEARCH",
+    );
+    const onlineSearch = hasOnlineSearch ? sections["ONLINE_SEARCH"] : undefined;
 
     if (problemText || explanation || answer) {
       problems.push({
@@ -148,6 +153,7 @@ export function parseSolveResponse(response: string): SolveResponse {
         answer: answer,
         // Parse steps specifically from the explanation text
         steps: MarkdownSectionParser.parseSteps(explanation),
+        onlineSearch,
       });
     }
   }
@@ -161,6 +167,7 @@ export function parseSolveResponse(response: string): SolveResponse {
           answer: "",
           explanation: response,
           steps: [{ title: "Error", content: response }],
+          onlineSearch: undefined,
         },
       ],
     };

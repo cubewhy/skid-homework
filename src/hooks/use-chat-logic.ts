@@ -14,6 +14,7 @@ import type { AiChatMessage } from "@/ai/chat-types";
 import chatPrompt from "@/ai/prompts/chat.prompt.md";
 import diagramToolPrompt from "@/ai/prompts/tools/diagram-tool.prompt.md";
 import mermaidToolPrompt from "@/ai/prompts/tools/mermaid-tool.prompt.md";
+import { useSettingsStore } from "@/store/settings-store";
 
 function trimTitle(text: string, fallback: string) {
   const trimmed = text.replace(/\s+/g, " ").trim();
@@ -64,6 +65,7 @@ export function useChatLogic() {
   const [searchQuery, setSearchQuery] = useState("");
   const [modelInput, setModelInput] = useState("");
   const [currentSourceId, setCurrentSourceId] = useState<string | null>(null);
+  const onlineSearchEnabled = useSettingsStore((s) => s.onlineSearchEnabled);
 
   const filteredThreads = useMemo(() => {
     if (!searchQuery.trim()) return threads;
@@ -299,6 +301,7 @@ export function useChatLogic() {
             updateMessage(chatId!, assistantMessageId, { content: aggregated });
           }
         },
+        { onlineSearch: onlineSearchEnabled },
       );
 
       if (aggregated.trim()) {

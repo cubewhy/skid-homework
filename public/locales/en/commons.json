@@ -375,6 +375,11 @@
       "desc": "Adjust advanced thinking parameters for supported providers.",
       "budget": "Thinking budget",
       "tokens-unit": "tokens"
+      ,"online-search": {
+        "title": "Online search",
+        "toggle": "Enable online search",
+        "desc": "Allow the assistant to call web search tools when needed."
+      }
     },
     "traits": {
       "title": "System Prompt (Traits)",
@@ -521,6 +526,10 @@
       "next-problem": "Next",
       "prev-image": "⟵ Image",
       "next-image": "Image ⟶"
+    },
+    "online-search": {
+      "title": "Online search results",
+      "placeholder": "No search indices provided."
     },
     "chat": {
       "button": "Chat about this",

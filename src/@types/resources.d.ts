@@ -454,7 +454,12 @@ interface Resources {
         "budget": "Thinking budget",
         "desc": "Adjust advanced thinking parameters for supported providers.",
         "title": "Thinking Settings",
-        "tokens-unit": "tokens"
+        "tokens-unit": "tokens",
+        "online-search": {
+          "title": "Online search",
+          "toggle": "Enable online search",
+          "desc": "Allow the assistant to call web search tools when needed."
+        }
       },
       "traits": {
         "desc": "Define the assistant's persona or extra instructions.",
@@ -508,6 +513,10 @@ interface Resources {
         "next-problem": "Next",
         "prev-image": "⟵ Image",
         "prev-problem": "Prev"
+      },
+      "online-search": {
+        "title": "Online search results",
+        "placeholder": "No search indices provided."
       },
       "open-preview": "open preview",
       "progress": {

@@ -60,6 +60,9 @@ export interface SettingsState {
 
   devtoolsEnabled: boolean;
   setDevtoolsState: (state: boolean) => void;
+
+  onlineSearchEnabled: boolean;
+  setOnlineSearchEnabled: (state: boolean) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -74,6 +77,7 @@ export const useSettingsStore = create<SettingsState>()(
       traits: "",
       explanationMode: "explanation",
       devtoolsEnabled: false,
+      onlineSearchEnabled: false,
 
       setImageEnhancement: (state) => set({ imageEnhancement: state }),
       setShowQwenHint: (state) => set({ showQwenHint: state }),
@@ -107,6 +111,7 @@ export const useSettingsStore = create<SettingsState>()(
       setTraits: (traits) => set({ traits }),
       setExplanationMode: (explanationMode) => set({ explanationMode }),
       setDevtoolsState: (state) => set({ devtoolsEnabled: state }),
+      setOnlineSearchEnabled: (state) => set({ onlineSearchEnabled: state }),
     }),
     {
       name: "skidhw-storage",
@@ -121,8 +126,9 @@ export const useSettingsStore = create<SettingsState>()(
         traits: state.traits,
         explanationMode: state.explanationMode,
         devtools: state.devtoolsEnabled,
+        onlineSearchEnabled: state.onlineSearchEnabled,
       }),
-      version: 5,
+      version: 6,
       migrate: (persistedState, version) => {
         const data: Partial<SettingsState> & Record<string, unknown> =
           persistedState && typeof persistedState === "object"
@@ -146,6 +152,9 @@ export const useSettingsStore = create<SettingsState>()(
           languageInitialized:
             (data as { languageInitialized?: boolean }).languageInitialized ??
             true,
+          onlineSearchEnabled:
+            (data as { onlineSearchEnabled?: boolean }).onlineSearchEnabled ??
+            false,
         };
       },
     },

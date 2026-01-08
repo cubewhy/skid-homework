@@ -1,5 +1,8 @@
 import OpenAI from "openai";
-import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import type {
+  ChatCompletionMessageParam,
+  ChatCompletionTool,
+} from "openai/resources/chat/completions";
 import type { AiChatMessage } from "./chat-types";
 
 export type OpenAiModel = {
@@ -46,6 +49,7 @@ export class OpenAiClient {
     prompt?: string,
     model = "gpt-4o-mini",
     callback?: (text: string) => void,
+    options?: { onlineSearch?: boolean },
   ) {
     const messages: ChatCompletionMessageParam[] = [];
 
@@ -86,7 +90,7 @@ export class OpenAiClient {
       content: contentParts,
     });
 
-    return this._executeStream(model, messages, callback);
+    return this._executeStream(model, messages, callback, options);
   }
 
   /**
@@ -96,6 +100,7 @@ export class OpenAiClient {
     messages: AiChatMessage[],
     model = "gpt-4o-mini",
     callback?: (text: string) => void,
+    options?: { onlineSearch?: boolean },
   ) {
     const openAiMessages: ChatCompletionMessageParam[] = [];
 
@@ -132,7 +137,7 @@ export class OpenAiClient {
       });
     }
 
-    return this._executeStream(model, openAiMessages, callback);
+    return this._executeStream(model, openAiMessages, callback, options);
   }
 
   /**
@@ -142,11 +147,16 @@ export class OpenAiClient {
     model: string,
     messages: ChatCompletionMessageParam[],
     callback?: (text: string) => void,
+    options?: { onlineSearch?: boolean },
   ): Promise<string> {
     const stream = await this.client.chat.completions.create({
       model,
       messages,
       stream: true,
+      // SDK types may not yet include web_search; cast to any to allow passthrough.
+      tools: options?.onlineSearch
+        ? ([{ type: "web_search" }] as unknown as ChatCompletionTool[])
+        : undefined,
     });
 
     let aggregated = "";

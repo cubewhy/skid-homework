@@ -95,6 +95,8 @@ export default function SettingsPage() {
     setImageEnhancement: setImageEnhancement,
     showQwenHint,
     setShowQwenHint,
+    onlineSearchEnabled,
+    setOnlineSearchEnabled,
     theme: themePreference,
     setThemePreference,
     language,
@@ -516,6 +518,29 @@ export default function SettingsPage() {
                 </div>
               </div>
             )}
+
+            <div className="space-y-2">
+              <Label htmlFor="online-search-toggle">
+                {t("thinking.online-search.title")}
+              </Label>
+              <div className="flex items-center gap-3">
+                <Checkbox
+                  id="online-search-toggle"
+                  checked={onlineSearchEnabled}
+                  onCheckedChange={(state) =>
+                    setOnlineSearchEnabled(Boolean(state))
+                  }
+                />
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">
+                    {t("thinking.online-search.toggle")}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {t("thinking.online-search.desc")}
+                  </p>
+                </div>
+              </div>
+            </div>
 
             <div className="space-y-2">
               <Label htmlFor="traits-input">{t("traits.title")}</Label>

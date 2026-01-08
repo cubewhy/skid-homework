@@ -250,6 +250,18 @@ export default function SolutionViewer({
               key={entry.item.id}
             />
 
+            {activeProblem?.onlineSearch !== undefined && (
+              <div>
+                <div className="mb-1 text-sm font-medium text-slate-300">
+                  {t("online-search.title")}
+                </div>
+                <div className="rounded-lg bg-slate-900/60 p-3 text-sm">
+                  {activeProblem.onlineSearch ||
+                    t("online-search.placeholder")}
+                </div>
+              </div>
+            )}
+
             <div className="flex flex-wrap gap-2">
               <ImproveSolutionDialog
                 ref={dialogRef}

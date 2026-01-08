@@ -371,6 +371,11 @@
       "desc": "针对支持的提供商调整高级思考设置。",
       "budget": "可用思考预算",
       "tokens-unit": "Tokens"
+      ,"online-search": {
+        "title": "联网搜索",
+        "toggle": "启用联网搜索",
+        "desc": "在需要时允许助手调用联网搜索工具。"
+      }
     },
     "traits": {
       "title": "系统提示（Traits）",
@@ -517,6 +522,10 @@
       "next-problem": "下一题",
       "prev-image": "⟵ 图片",
       "next-image": "图片 ⟶"
+    },
+    "online-search": {
+      "title": "联网搜索结果",
+      "placeholder": "没有可用的搜索索引。"
     },
     "chat": {
       "button": "与 AI 聊聊",
