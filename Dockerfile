@@ -29,10 +29,13 @@ COPY . .
 # Uncomment the following line in case you want to disable telemetry during the build.
 # ENV NEXT_TELEMETRY_DISABLED=1
 
+ARG ENABLE_PWA=true
+ENV ENABLE_PWA=$ENABLE_PWA
+
 RUN \
-  if [ -f yarn.lock ]; then yarn run build; \
-  elif [ -f package-lock.json ]; then npm run build; \
-  elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm run build; \
+  if [ -f yarn.lock ]; then yarn run build:docker; \
+  elif [ -f package-lock.json ]; then npm run build:docker; \
+  elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm run build:docker; \
   else echo "Lockfile not found." && exit 1; \
   fi
 

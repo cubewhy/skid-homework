@@ -3,9 +3,15 @@ import type { Metadata } from "next";
 import Providers from "./providers";
 
 export const metadata: Metadata = {
-  title: "Skid Homework",
+  title: "Serina-chan Helper",
   description:
     "The open source workaround for self-learners. Time-saving, no telemetry, free.",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Serina-chan Helper",
+  },
 };
 
 export default function RootLayout({

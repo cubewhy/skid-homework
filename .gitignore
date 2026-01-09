@@ -41,3 +41,9 @@ devenv.local.yaml
 # pre-commit
 .pre-commit-config.yaml
 qodana.yaml
+
+# PWA
+public/sw.js
+public/sw.js.map
+public/workbox-*.js
+public/workbox-*.js.map

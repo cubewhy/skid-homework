@@ -2,9 +2,7 @@ name: Docker Image CI
 
 on:
   push:
-    branches: ["main"]
-    tags:
-      - "v*"
+    branches: ["jnu-test"]
   pull_request:
     branches: ["main"]
   workflow_dispatch:
@@ -84,3 +82,4 @@ jobs:
             VERSION=${{ github.ref_name }}
             REVISION=${{ github.sha }}
             BUILDKIT_INLINE_CACHE=1
+            ENABLE_PWA=true

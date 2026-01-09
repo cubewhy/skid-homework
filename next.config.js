@@ -1,7 +1,13 @@
+import withSerwistInit from "@serwist/next";
+
+const withSerwist = withSerwistInit({
+  swSrc: "src/app/sw.ts",
+  swDest: "public/sw.js",
+});
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
-
   turbopack: {
     rules: {
       "*.md": {
@@ -10,6 +16,13 @@ const nextConfig = {
       },
     },
   },
+  webpack: (config) => {
+    config.module.rules.push({
+      test: /\.md$/,
+      use: "raw-loader",
+    });
+    return config;
+  },
 };
 
-export default nextConfig;
+export default process.env.ENABLE_PWA === "true" ? withSerwist(nextConfig) : nextConfig;
