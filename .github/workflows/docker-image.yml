@@ -69,7 +69,10 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: |
+            type=ref,event=tag
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |
             type=gha
