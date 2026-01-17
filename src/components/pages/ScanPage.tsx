@@ -8,8 +8,6 @@ import ActionsCard from "../cards/ActionsCard";
 import PreviewCard from "../cards/PreviewCard";
 
 import solvePrompt from "@/ai/prompts/solve.prompt.md";
-import diagramToolPrompt from "@/ai/prompts/tools/diagram-tool.prompt.md";
-import mermaidToolPrompt from "@/ai/prompts/tools/mermaid-tool.prompt.md";
 
 import { uint8ToBase64 } from "@/utils/encoding";
 import { parseSolveResponse } from "@/ai/response";
@@ -30,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { useShortcut } from "@/hooks/use-shortcut";
 import OpenCVLoader from "../OpenCVLoader";
+import { getEnabledToolCallingPrompts } from "@/ai/prompts/prompt-manager";
 
 export default function ScanPage() {
   const { t } = useTranslation("commons", { keyPrefix: "scan-page" });
@@ -343,7 +342,7 @@ ${traits}
             ai.addSystemPrompt(solvePrompt);
             ai.addSystemPrompt(promptPrompt + traitsPrompt);
 
-            ai.setAvailableTools([diagramToolPrompt, mermaidToolPrompt]);
+            ai.setAvailableTools(getEnabledToolCallingPrompts());
 
             clearStreamedOutput(item.url);
 

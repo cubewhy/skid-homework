@@ -13,8 +13,7 @@ import { useTranslation } from "react-i18next";
 import { TextInputDialog } from "./TextInputDialog";
 
 import improvePrompt from "../../ai/prompts/improve.prompt.md";
-import diagramToolPrompt from "@/ai/prompts/tools/diagram-tool.prompt.md";
-import mermaidToolPrompt from "@/ai/prompts/tools/mermaid-tool.prompt.md";
+import { getEnabledToolCallingPrompts } from "@/ai/prompts/prompt-manager";
 
 export type ImproveSolutionDialogProps = {
   entry: OrderedSolution;
@@ -105,7 +104,7 @@ ${source.traits}
         ai.addSystemPrompt(improvePrompt);
         ai.addSystemPrompt(traitsPrompt);
 
-        ai.setAvailableTools([diagramToolPrompt, mermaidToolPrompt]);
+        ai.setAvailableTools(getEnabledToolCallingPrompts());
 
         try {
           clearStreamedOutput(entry.item.url);

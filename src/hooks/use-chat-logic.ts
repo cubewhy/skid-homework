@@ -12,8 +12,7 @@ import { useChatStore } from "@/store/chat-store";
 import type { AiChatMessage } from "@/ai/chat-types";
 
 import chatPrompt from "@/ai/prompts/chat.prompt.md";
-import diagramToolPrompt from "@/ai/prompts/tools/diagram-tool.prompt.md";
-import mermaidToolPrompt from "@/ai/prompts/tools/mermaid-tool.prompt.md";
+import { getEnabledToolCallingPrompts } from "@/ai/prompts/prompt-manager";
 
 function trimTitle(text: string, fallback: string) {
   const trimmed = text.replace(/\s+/g, " ").trim();
@@ -287,7 +286,7 @@ export function useChatLogic() {
       client.addSystemPrompt(chatPrompt);
       client.addSystemPrompt(traitsPrompt);
 
-      client.setAvailableTools([diagramToolPrompt, mermaidToolPrompt]);
+      client.setAvailableTools(getEnabledToolCallingPrompts());
 
       let aggregated = "";
       await client.sendChat(
