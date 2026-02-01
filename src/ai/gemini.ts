@@ -1,5 +1,6 @@
 import { GoogleGenAI, HarmBlockThreshold, HarmCategory } from "@google/genai";
 import type { AiChatMessage } from "./chat-types";
+import { BaseAiClient } from "./base-client";
 
 export interface GeminiModel {
   name: string;
@@ -14,22 +15,18 @@ export interface GeminiConfig {
   }>;
 }
 
-export class GeminiAi {
+export class GeminiAi extends BaseAiClient {
   private ai: GoogleGenAI;
-  private systemPrompts: string[];
-  private toolPrompts: string[];
   private config: GeminiConfig;
 
   constructor(key: string, baseUrl?: string, config?: GeminiConfig) {
+    super();
     this.ai = new GoogleGenAI({
       apiKey: key,
       httpOptions: {
         baseUrl: baseUrl,
       },
     });
-
-    this.systemPrompts = [];
-    this.toolPrompts = [];
 
     this.config = {
       thinkingBudget: config?.thinkingBudget ?? -1,
@@ -54,26 +51,6 @@ export class GeminiAi {
     };
   }
 
-  addSystemPrompt(prompt: string) {
-    this.systemPrompts?.push(prompt);
-  }
-
-  setAvailableTools(prompts: string[]) {
-    this.toolPrompts = prompts;
-  }
-
-  private buildSystemPrompt(): string {
-    let prompt = this.systemPrompts.join("\n\n");
-
-    if (this.toolPrompts.length > 0) {
-      // build tool calling prompts
-      prompt += "\n## Available Tools\n\n";
-      prompt += this.toolPrompts.join("\n\n");
-    }
-
-    return prompt;
-  }
-
   async sendMedia(
     media: string,
     mimeType: string,
@@ -83,7 +60,7 @@ export class GeminiAi {
   ) {
     const contents = [];
 
-    if (this.systemPrompts) {
+    if (this.systemPrompts.length > 0) {
       const systemPrompt = this.buildSystemPrompt();
       contents.push({
         role: "user",
@@ -91,8 +68,7 @@ export class GeminiAi {
       });
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parts: any[] = [];
+    const parts: Array<{ text: string } | { fileData: { mimeType: string; fileUri: string } } | { inlineData: { mimeType: string; data: string } }> = [];
     if (prompt) {
       parts.push({ text: prompt });
     }
@@ -108,7 +84,7 @@ export class GeminiAi {
       parts.push({
         inlineData: {
           mimeType,
-          data: media, // base64
+          data: media,
         },
       });
     }
@@ -127,14 +103,7 @@ export class GeminiAi {
       contents,
     });
 
-    let result = "";
-    for await (const chunk of response) {
-      if (chunk.text) {
-        result += chunk.text;
-        callback?.(chunk.text);
-      }
-    }
-    return result;
+    return this.handleStreamResponse(response, callback);
   }
 
   async getAvailableModels(): Promise<GeminiModel[]> {
@@ -152,7 +121,7 @@ export class GeminiAi {
   ) {
     const contents = [];
 
-    if (this.systemPrompts) {
+    if (this.systemPrompts.length > 0) {
       const systemPrompt = this.buildSystemPrompt();
       contents.push({
         role: "user",
@@ -160,12 +129,7 @@ export class GeminiAi {
       });
     }
 
-    console.log(
-      `AI Query with ${model}\nSystem prompt:`,
-      this.systemPrompts,
-      "\nUser query:",
-      messages,
-    );
+    this.logAiQuery(model, messages);
 
     for (const message of messages) {
       const trimmed = message.content?.trim();
@@ -188,13 +152,6 @@ export class GeminiAi {
       contents,
     });
 
-    let result = "";
-    for await (const chunk of response) {
-      if (chunk.text) {
-        result += chunk.text;
-        callback?.(chunk.text);
-      }
-    }
-    return result.trim();
+    return this.handleStreamResponse(response, callback);
   }
 }

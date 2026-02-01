@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import type { AiChatMessage } from "./chat-types";
+import { BaseAiClient } from "./base-client";
 
 export type OpenAiModel = {
   name: string;
@@ -14,39 +15,16 @@ function normalizeBaseUrl(baseUrl?: string) {
   return normalized;
 }
 
-export class OpenAiClient {
+export class OpenAiClient extends BaseAiClient {
   private client: OpenAI;
-  private systemPrompts: string[];
-  private toolPrompts: string[];
 
   constructor(apiKey: string, baseUrl?: string) {
+    super();
     this.client = new OpenAI({
       apiKey,
       baseURL: normalizeBaseUrl(baseUrl),
       dangerouslyAllowBrowser: true,
     });
-    this.systemPrompts = [];
-    this.toolPrompts = [];
-  }
-
-  addSystemPrompt(prompt: string) {
-    this.systemPrompts?.push(prompt);
-  }
-
-  setAvailableTools(prompts: string[]) {
-    this.toolPrompts = prompts;
-  }
-
-  private buildSystemPrompt(): string {
-    let prompt = this.systemPrompts.join("\n\n");
-
-    if (this.toolPrompts.length > 0) {
-      // build tool calling prompts
-      prompt += "\n## Available Tools\n\n";
-      prompt += this.toolPrompts.join("\n\n");
-    }
-
-    return prompt;
   }
 
   /**
@@ -61,8 +39,7 @@ export class OpenAiClient {
   ) {
     const messages: ChatCompletionMessageParam[] = [];
 
-    // 1. Add System Prompt
-    if (this.systemPrompts) {
+    if (this.systemPrompts.length > 0) {
       const systemPrompt = this.buildSystemPrompt();
       messages.push({
         role: "system",
@@ -70,7 +47,6 @@ export class OpenAiClient {
       });
     }
 
-    // 2. Build User Content (Text + Image)
     const contentParts: Array<
       | { type: "text"; text: string }
       | {
@@ -112,23 +88,16 @@ export class OpenAiClient {
   ) {
     const openAiMessages: ChatCompletionMessageParam[] = [];
 
-    // 1. Add System Prompt
-    if (this.systemPrompts) {
+    if (this.systemPrompts.length > 0) {
       const systemPrompt = this.buildSystemPrompt();
-      messages.push({
+      openAiMessages.push({
         role: "system",
         content: systemPrompt,
       });
     }
 
-    console.log(
-      `AI Query with ${model}\nSystem prompt:`,
-      this.systemPrompts,
-      "\nUser query:",
-      messages,
-    );
+    this.logAiQuery(model, messages);
 
-    // 2. Convert History
     for (const message of messages) {
       const trimmed = message.content?.trim();
       if (!trimmed) continue;
@@ -167,7 +136,6 @@ export class OpenAiClient {
 
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta?.content || "";
-
       if (delta) {
         aggregated += delta;
         callback?.(delta);
