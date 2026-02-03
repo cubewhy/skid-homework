@@ -45,6 +45,7 @@ export default function PreviewItem({
   const { setSelectedImage, selectedImage } = useProblemsStore((s) => s);
 
   const isMobile = layout === "mobile";
+  const isSelected = selectedImage === item.url;
 
   const switchActiveItem = () => {
     setSelectedImage(item.url);
@@ -61,7 +62,7 @@ export default function PreviewItem({
             isMobile
               ? "h-64 min-w-[72vw] rounded-2xl border-white/15"
               : "rounded-xl border-white/10",
-            selectedImage === item.url ? "bg-accent" : "",
+            isSelected ? "bg-accent" : "",
             getColorClassByStatus(item.status),
           )}
         >
