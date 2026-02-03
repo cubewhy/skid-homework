@@ -5,7 +5,7 @@ import {
   type ChatMessageRecord,
   type ChatRole,
   type ChatThreadRecord,
-} from "./chat-db";
+} from "../db/chat-db";
 
 type MessageInput = {
   id?: string;

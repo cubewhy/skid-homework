@@ -31,7 +31,7 @@ import {
   CommandItem,
   CommandList,
 } from "../ui/command";
-import { ChatThreadRecord } from "@/store/chat-db";
+import { ChatThreadRecord } from "@/db/chat-db";
 
 interface ChatHeaderProps {
   sidebarOpen: boolean;

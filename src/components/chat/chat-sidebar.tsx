@@ -22,7 +22,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
-import { ChatThreadRecord } from "@/store/chat-db";
+import { ChatThreadRecord } from "@/db/chat-db";
 import { useRef } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 
