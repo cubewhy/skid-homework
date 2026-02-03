@@ -173,15 +173,13 @@ export const useProblemsStore = create<ProblemsState>((set, get) => ({
 
     if (!oldItem || oldItem.displayName === newName) return;
 
+    const originalItem: FileItem = { ...oldItem };
+
     const newFile = new File([oldItem.file], newName, {
       type: oldItem.mimeType || oldItem.file.type,
       lastModified: Date.now(),
     });
     const newUrl = URL.createObjectURL(newFile);
-
-    if (oldItem.url) {
-      URL.revokeObjectURL(oldItem.url);
-    }
 
     set((state) => ({
       imageItems: state.imageItems.map((item) =>
@@ -196,9 +194,21 @@ export const useProblemsStore = create<ProblemsState>((set, get) => ({
         fileName: newName,
         blob: newFile,
       });
+
+      // revoke old url after db operation successed
+      if (originalItem.url) URL.revokeObjectURL(originalItem.url);
     } catch (error) {
       console.error("Failed to update database:", error);
-      // TODO: rollback state on db fail
+
+      // rollback state in zustand
+      set((state) => ({
+        imageItems: state.imageItems.map((item) =>
+          item.id === id ? originalItem : item,
+        ),
+      }));
+
+      // revoke new url
+      if (newUrl) URL.revokeObjectURL(newUrl);
     }
   },
 
