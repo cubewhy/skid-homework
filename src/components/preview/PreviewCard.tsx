@@ -1,6 +1,6 @@
 /* eslint-disable @next/next/no-img-element */
 import "react-photo-view/dist/react-photo-view.css";
-import { ImageIcon, Trash2, X } from "lucide-react";
+import { Trash2, X } from "lucide-react";
 import { PhotoProvider, PhotoView } from "react-photo-view";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { ScrollArea } from "../ui/scroll-area";
@@ -10,6 +10,7 @@ import type { FileItem, FileStatus } from "@/store/problems-store";
 import { useCallback, useState, type ClipboardEvent } from "react";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import EmptyPreviewArea from "./EmptyPreviewArea";
 
 export type PreviewCardProps = {
   items: FileItem[];
@@ -95,30 +96,11 @@ export default function PreviewCard({
           onDragLeave={() => !isMobileLayout && setIsDragging(false)}
         >
           {items.length === 0 ? (
-            <div
-              className={cn(
-                "flex flex-col items-center justify-center rounded-lg border text-slate-400",
-                isMobileLayout
-                  ? "h-48 border-white/20 bg-muted/30 px-6 text-center text-base"
-                  : "h-64 border-dashed",
-                isDragging && !isMobileLayout
-                  ? "border-indigo-400 bg-indigo-500/10"
-                  : "border-white/15",
-              )}
+            <EmptyPreviewArea
+              layout={layout}
+              isDragging={isDragging}
               onDrop={onDrop}
-            >
-              <ImageIcon className="mb-2 h-6 w-6" />
-              <p className="text-sm">
-                {/* No images yet. Upload or take a photo to begin. */}
-                {t("no-files")}
-              </p>
-              <p className="text-sm">
-                {/* You can drag your files to this panel. */}
-                {isMobileLayout
-                  ? t("drag-tip-mobile", { defaultValue: t("drag-tip") })
-                  : t("drag-tip")}
-              </p>
-            </div>
+            />
           ) : (
             <PhotoProvider>
               {isMobileLayout ? (

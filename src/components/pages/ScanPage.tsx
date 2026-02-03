@@ -5,7 +5,7 @@ import { Info, StarIcon } from "lucide-react";
 import { useEffect, useMemo, useCallback, useState } from "react";
 import { useAiStore } from "@/store/ai-store";
 import ActionsCard from "../cards/ActionsCard";
-import PreviewCard from "../cards/PreviewCard";
+import PreviewCard from "../preview/PreviewCard";
 
 import solvePrompt from "@/ai/prompts/solve.prompt.md";
 
