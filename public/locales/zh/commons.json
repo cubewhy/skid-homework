@@ -32,8 +32,20 @@
       "pdf": "PDF",
       "unknown": "未知类型"
     },
-    "remove-aria": "移除图片",
-    "drop-cancel": "拖到这里取消"
+    "drop-cancel": "拖到这里取消",
+    "remove": {
+      "menu-item": "移除图片",
+      "aria": "移除图片"
+    },
+    "rename": {
+      "menu-item": "重命名",
+      "dialog": {
+        "title": "重命名文件",
+        "desc": "请输入文件的新名称",
+        "confirm": "确认",
+        "new-name": "新名称"
+      }
+    }
   },
   "scan-page": {
     "discussions-btn": "讨论区",

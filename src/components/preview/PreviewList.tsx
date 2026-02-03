@@ -15,6 +15,7 @@ import { Label } from "../ui/label";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 import PreviewItem from "./PreviewItem";
+import { useTranslation } from "react-i18next";
 
 export type PreviewListProps = {
   layout: "default" | "mobile";
@@ -29,6 +30,7 @@ export default function PreviewList({
   removeItem,
   isDragging,
 }: PreviewListProps) {
+  const { t } = useTranslation("commons", { keyPrefix: "preview" });
   const isMobileLayout = layout === "mobile";
 
   const { imageItems, renameFileItem } = useProblemsStore((s) => s);
@@ -97,15 +99,20 @@ export default function PreviewList({
       >
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
-            <DialogTitle>Rename File</DialogTitle>
+            <DialogTitle>
+              {/* Rename File */}
+              {t("rename.dialog.title")}
+            </DialogTitle>
             <DialogDescription>
-              Enter a new name for the file.
+              {/* Enter a new name for the file. */}
+              {t("rename.dialog.desc")}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="name" className="text-right">
-                Name
+                {/* New Name */}
+                {t("rename.dialog.new-name")}
               </Label>
               <Input
                 id="name"
@@ -124,7 +131,7 @@ export default function PreviewList({
               onClick={handleConfirmRename}
               disabled={!tempName.trim()}
             >
-              Save changes
+              {t("rename.dialog.confirm")}
             </Button>
           </DialogFooter>
         </DialogContent>

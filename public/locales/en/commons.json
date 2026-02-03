@@ -32,8 +32,20 @@
       "pdf": "PDF",
       "unknown": "Unknown type"
     },
-    "remove-aria": "Remove image",
-    "drop-cancel": "Drag here to cancel"
+    "drop-cancel": "Drag here to cancel",
+    "remove": {
+      "menu-item": "Remove",
+      "aria": "Remove Image"
+    },
+    "rename": {
+      "menu-item": "Rename",
+      "dialog": {
+        "title": "Rename File",
+        "desc": "Please enter the new name for the file",
+        "confirm": "Confirm",
+        "new-name": "New Name"
+      }
+    }
   },
   "scan-page": {
     "discussions-btn": "Discussions",

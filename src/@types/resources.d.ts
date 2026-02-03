@@ -189,7 +189,19 @@ interface Resources {
       },
       "image-alt": "Homework preview",
       "no-files": "No files yet. Upload or take a photo to begin.",
-      "remove-aria": "Remove image",
+      "remove": {
+        "aria": "Remove Image",
+        "menu-item": "Remove"
+      },
+      "rename": {
+        "dialog": {
+          "confirm": "Confirm",
+          "desc": "Please enter the new name for the file",
+          "new-name": "New Name",
+          "title": "Rename File"
+        },
+        "menu-item": "Rename"
+      },
       "title": "Preview"
     },
     "problem-list": {

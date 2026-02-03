@@ -78,7 +78,7 @@ export default function PreviewItem({
               e.stopPropagation();
               onRemove(item.id);
             }}
-            aria-label={t("remove-aria")}
+            aria-label={t("remove.aria")}
           >
             <X className="h-4 w-4" />
           </button>
@@ -93,14 +93,14 @@ export default function PreviewItem({
         <ContextMenuSeparator />
         <ContextMenuItem onClick={() => onRename(item.id, item.displayName)}>
           <Pen className="mr-2 h-4 w-4" />
-          Rename
+          {t("rename.menu-item")}
         </ContextMenuItem>
         <ContextMenuItem
           onClick={() => onRemove(item.id)}
           variant="destructive"
         >
           <Trash2 className="mr-2 h-4 w-4" />
-          Delete
+          {t("remove.menu-item")}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
