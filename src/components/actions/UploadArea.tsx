@@ -1,60 +1,25 @@
-import {Camera, Upload, MoreVertical} from "lucide-react";
+import {Camera, MoreVertical, Upload} from "lucide-react";
 import {Button} from "../ui/button";
 import {toast} from "sonner";
 import {useCallback, useEffect, useRef, useState} from "react";
 import Image from "next/image";
-import {
-    Dialog,
-    DialogContent,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from "../ui/dialog";
-import {useProblemsStore, type FileItem} from "@/store/problems-store";
+import {Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,} from "../ui/dialog";
+import {type FileItem, useProblemsStore} from "@/store/problems-store";
 import {Trans, useTranslation} from "react-i18next";
 import {useMediaQuery} from "@/hooks/use-media-query";
 import {cn} from "@/lib/utils";
 import {useShortcut} from "@/hooks/use-shortcut";
 import {ShortcutHint} from "../ShortcutHint";
 import {useNativeCamera} from "@/hooks/use-native-camera";
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from "../ui/dropdown-menu";
-import {
-    captureAdbScreenshot,
-    isAdbDeviceConnected,
-    reconnectAdbDevice,
-} from "@/lib/webadb/screenshot";
+import {DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,} from "../ui/dropdown-menu";
+import {captureAdbScreenshot, isAdbDeviceConnected, reconnectAdbDevice,} from "@/lib/webadb/screenshot";
 import {UnsupportedEnvironmentError} from "@/lib/webadb/manager";
+import {TimeoutError, withTimeout} from "@/utils/timeout.ts";
 
 export type UploadAreaProps = {
     appendFiles: (files: File[] | FileList, source: FileItem["source"]) => void;
     allowPdf: boolean;
 };
-
-export class TimeoutError extends Error {
-    constructor(message: string) {
-        super(message);
-        this.name = "TimeoutError";
-    }
-}
-
-export function withTimeout<T>(
-    promise: Promise<T>,
-    ms: number,
-    timeoutErrorMsg = 'Operation timed out'
-): Promise<T> {
-    const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => {
-            reject(new TimeoutError(timeoutErrorMsg));
-        }, ms);
-    });
-
-    return Promise.race([promise, timeoutPromise]);
-}
 
 export default function UploadArea({appendFiles, allowPdf}: UploadAreaProps) {
     const {t} = useTranslation("commons", {keyPrefix: "upload-area"});
