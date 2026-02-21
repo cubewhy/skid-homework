@@ -15,6 +15,7 @@ interface Resources {
       "processing": "Processing...",
       "scan": "Let's Skid",
       "settings": "Settings",
+      "stop": "Stop Skidding",
       "title": "Add Images"
     },
     "chat-page": {
@@ -249,6 +250,10 @@ interface Resources {
       "tip": "We never upload without your action.",
       "title": "Scan your homework",
       "toasts": {
+        "aborted": {
+          "description": "The skidding task has been manually stopped.",
+          "title": "Aborted"
+        },
         "all-processed": {
           "description": "There are no pending or failed images to scan.",
           "title": "All images processed"

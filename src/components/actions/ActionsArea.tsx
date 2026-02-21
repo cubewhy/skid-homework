@@ -27,13 +27,20 @@ export default function ActionsArea({
   const isMobileLayout = layout === "mobile";
 
   const isWorking = useProblemsStore((s) => s.isWorking);
+  const [confirmedStop, setConfirmedStop] = useState(false);
+
   const handleSkidBtnClicked = useCallback(() => {
     if (isWorking) {
-      stopScan?.();
+      if (confirmedStop) {
+        stopScan?.();
+        setConfirmedStop(false);
+      } else {
+        setConfirmedStop(true);
+      }
       return;
     }
     startScan();
-  }, [isWorking, startScan, stopScan]);
+  }, [isWorking, confirmedStop, startScan, stopScan]);
 
   const clearAllBtnRef = useRef<HTMLButtonElement | null>(null);
   const skidBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -50,14 +57,15 @@ export default function ActionsArea({
   }, [clearAll, confirmedClear]);
 
   useEffect(() => {
-    if (!confirmedClear) return; // do not modify the variable if it is already false
+    if (!confirmedClear && !confirmedStop) return;
     const timeoutId = setTimeout(() => {
       setConfirmedClear(false);
+      setConfirmedStop(false);
     }, 3000);
     return () => {
       clearTimeout(timeoutId);
     };
-  }, [confirmedClear, setConfirmedClear]);
+  }, [confirmedClear, confirmedStop]);
 
   const scanShortcut = useShortcut(
     "startScan",
@@ -90,7 +98,7 @@ export default function ActionsArea({
           isMobileLayout && "py-6 text-base",
         )}
         size={isMobileLayout ? "lg" : "default"}
-        disabled={itemsLength === 0 || isWorking}
+        disabled={itemsLength === 0}
         onClick={handleClearAll}
       >
         <span className="flex items-center gap-2">
@@ -101,17 +109,18 @@ export default function ActionsArea({
       </Button>
       <Button
         ref={skidBtnRef}
+        variant={isWorking ? "destructive" : "default"}
         className={cn(
           "flex-1 items-center justify-center gap-2",
           isMobileLayout && "py-6 text-base",
         )}
         size={isMobileLayout ? "lg" : "default"}
-        disabled={itemsLength === 0 || isWorking}
+        disabled={itemsLength === 0}
         onClick={handleSkidBtnClicked}
       >
         {isWorking ? (
           <>
-            <Loader2Icon className="h-5 w-5 animate-spin" /> {t("stop")}
+            <Loader2Icon className="h-5 w-5 animate-spin" /> {confirmedStop ? t("clear-confirmation") : t("stop")}
           </>
         ) : (
           <>
