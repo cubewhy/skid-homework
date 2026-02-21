@@ -232,13 +232,31 @@ export default function SolutionViewer({
               <div className="rounded-lg bg-slate-300/60 dark:bg-slate-900/60 p-3">
                 <MemoizedMarkdown source={activeProblem?.answer ?? ""} />
               </div>
-              <div className="mt-2">
+              <div className="mt-2 flex gap-2">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => copyToClipboard(activeProblem?.answer ?? "")}
                 >
                   {t("copy.button")} <Kbd>Ctrl+⇧+C</Kbd>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={goPrevProblem}
+                  disabled={selectedProblem === 0}
+                >
+                  {t("navigation.prev-problem")}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={goNextProblem}
+                  disabled={
+                    selectedProblem >= entry.solutions.problems.length - 1
+                  }
+                >
+                  {t("navigation.next-problem")}
                 </Button>
               </div>
             </div>
