@@ -205,7 +205,7 @@ export default function ScanPage() {
   const stopScan = () => {
     abortControllerRef.current?.abort();
     setWorking(false);
-    toast.info("已停止打滑喵 🐾");
+    toast.info(t("toasts.aborted.title"), { description: t("toasts.aborted.description") });
   };
 
   const clearAll = () => {

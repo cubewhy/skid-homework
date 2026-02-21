@@ -111,7 +111,7 @@ export default function ActionsArea({
       >
         {isWorking ? (
           <>
-            <Loader2Icon className="h-5 w-5 animate-spin" /> "停止打滑"
+            <Loader2Icon className="h-5 w-5 animate-spin" /> {t("stop")}
           </>
         ) : (
           <>

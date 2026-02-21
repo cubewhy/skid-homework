@@ -10,6 +10,7 @@
     "clear-all": "Clear All",
     "clear-confirmation": "Click again to clear",
     "processing": "Processing...",
+    "stop": "Stop Skidding",
     "scan": "Let's Skid",
     "chat": "Chat",
     "settings": "Settings",
@@ -104,6 +105,10 @@
       "pdf-blocked": {
         "title": "PDF uploads disabled",
         "description": "Enable a Gemini source to process PDF files."
+      },
+      "aborted": {
+        "title": "Aborted",
+        "description": "The skidding task has been manually stopped."
       }
     },
     "errors": {

@@ -10,6 +10,7 @@
     "clear-all": "清空所有文件",
     "clear-confirmation": "再点击一次",
     "processing": "处理中...",
+    "stop": "停止打滑",
     "scan": "开始打滑",
     "chat": "聊天",
     "settings": "设置",
@@ -100,6 +101,10 @@
       "pdf-blocked": {
         "title": "PDF 上传已禁用",
         "description": "要处理 PDF，请启用 Gemini 源。"
+      },
+      "aborted": {
+        "title": "已停止",
+        "description": "打滑任务已被手动停止喵 🐾"
       }
     },
     "errors": {
