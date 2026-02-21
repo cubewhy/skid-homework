@@ -82,6 +82,7 @@ export interface ProblemsState {
   setSelectedImageId: (id?: string) => void; // Renamed
   setSelectedProblem: (index: number) => void;
   setWorking: (isWorking: boolean) => void;
+  stopWorking: () => void;
 }
 
 export const useProblemsStore = create<ProblemsState>()(
@@ -422,6 +423,7 @@ export const useProblemsStore = create<ProblemsState>()(
       setSelectedImageId: (selectedImageId) => set({ selectedImageId }),
       setSelectedProblem: (selectedProblem) => set({ selectedProblem }),
       setWorking: (isWorking) => set({ isWorking }),
+      stopWorking: () => set({ isWorking: false }),
     }),
     {
       name: "problems-storage",

@@ -34,6 +34,7 @@ import { useStoreInitialization } from "@/hooks/use-store-initialization";
 export default function ScanPage() {
   const { t } = useTranslation("commons", { keyPrefix: "scan-page" });
   const router = useRouter();
+  const abortControllerRef = useRef<AbortController | null>(null);
   // Destructure all necessary state and new semantic actions from the store.
   const {
     imageItems: items,
@@ -201,6 +202,12 @@ export default function ScanPage() {
   };
 
   // Function to clear all uploaded items and solutions.
+  const stopScan = () => {
+    abortControllerRef.current?.abort();
+    setWorking(false);
+    toast.info("已停止打滑喵 🐾");
+  };
+
   const clearAll = () => {
     items.forEach((i) => URL.revokeObjectURL(i.url)); // Clean up all object URLs.
     clearAllItems();
@@ -243,6 +250,7 @@ export default function ScanPage() {
    * It polls through the configured AI sources until one succeeds per item.
    */
   const startScan = async () => {
+    abortControllerRef.current = new AbortController();
     const availableSources = enabledSources;
 
     if (!availableSources.length) {
@@ -312,6 +320,7 @@ export default function ScanPage() {
       removeSolutionsByIds(idsToProcess);
 
       const processOne = async (item: FileItem) => {
+        if (abortControllerRef.current?.signal.aborted) return;
         console.log(`Processing ${item.id}`);
 
         const buf = await item.file.arrayBuffer();
@@ -355,6 +364,7 @@ ${traits}
 
             clearStreamedOutput(item.id);
 
+            if (abortControllerRef.current?.signal.aborted) throw new Error("Aborted");
             const resText = await retryAsyncOperation(() =>
               aiClient.sendMedia(
                 base64,
@@ -545,6 +555,7 @@ ${traits}
                   appendFiles={appendFiles}
                   clearAll={clearAll}
                   startScan={startScan}
+                stopScan={stopScan}
                   totalBytes={totalBytes}
                   items={items}
                   allowPdfUploads={allowPdfUploads}
@@ -566,6 +577,7 @@ ${traits}
                 appendFiles={appendFiles}
                 clearAll={clearAll}
                 startScan={startScan}
+                stopScan={stopScan}
                 totalBytes={totalBytes}
                 items={items}
                 allowPdfUploads={allowPdfUploads}

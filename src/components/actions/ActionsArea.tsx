@@ -10,6 +10,7 @@ import GlobalTraitsEditor from "./GlobalTraitsEditor";
 
 export type ActionsAreaProps = {
   startScan: () => Promise<void>;
+  stopScan?: () => void;
   clearAll: () => void;
   itemsLength: number;
   layout?: "default" | "mobile";
@@ -17,6 +18,7 @@ export type ActionsAreaProps = {
 
 export default function ActionsArea({
   startScan,
+  stopScan,
   itemsLength,
   clearAll,
   layout = "default",
@@ -26,9 +28,12 @@ export default function ActionsArea({
 
   const isWorking = useProblemsStore((s) => s.isWorking);
   const handleSkidBtnClicked = useCallback(() => {
-    if (isWorking) return;
+    if (isWorking) {
+      stopScan?.();
+      return;
+    }
     startScan();
-  }, [isWorking, startScan]);
+  }, [isWorking, startScan, stopScan]);
 
   const clearAllBtnRef = useRef<HTMLButtonElement | null>(null);
   const skidBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -106,7 +111,7 @@ export default function ActionsArea({
       >
         {isWorking ? (
           <>
-            <Loader2Icon className="h-5 w-5 animate-spin" /> {t("processing")}
+            <Loader2Icon className="h-5 w-5 animate-spin" /> "停止打滑"
           </>
         ) : (
           <>
