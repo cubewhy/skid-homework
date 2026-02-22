@@ -13,7 +13,7 @@
     "scan": "Let's Skid",
     "chat": "Chat",
     "settings": "Settings",
-    "title": "Add Images",
+    "title": "Add Homework",
     "global-traits": {
       "trigger": "Global Traits Editor",
       "title": "Edit Global Traits",
@@ -25,9 +25,10 @@
   "preview": {
     "drag-tip": "You can drag or paste your files to this panel.",
     "drag-tip-mobile": "Tap a card to zoom in. Swipe left or right to review everything.",
+    "supported-types": "Supports images, text, Markdown, JSON, etc.",
     "no-files": "No files yet. Upload or take a photo to begin.",
     "title": "Preview",
-    "tip": "Hint: double click to focus image on solution area, single click to preview in full screen",
+    "tip": "Hint: double click to focus file on solution area, single click to preview in full screen",
     "image-alt": "Homework preview",
     "file-type": {
       "pdf": "PDF",
@@ -36,7 +37,7 @@
     "drop-cancel": "Drag here to cancel",
     "remove": {
       "menu-item": "Remove",
-      "aria": "Remove Image"
+      "aria": "Remove File"
     },
     "rename": {
       "menu-item": "Rename",
@@ -78,8 +79,8 @@
         "description": "Please set an API key for {{provider}} in Settings."
       },
       "all-processed": {
-        "title": "All images processed",
-        "description": "There are no pending or failed images to scan."
+        "title": "All files processed",
+        "description": "There are no pending or failed files to scan."
       },
       "working": {
         "title": "Working...",
@@ -167,22 +168,22 @@
     }
   },
   "solutions": {
-    "analyzing": "Analyzing... extracting problems and solutions from your images.",
-    "idle": "No solutions yet. Add images and click \"Let's Skid\" to see results here.",
+    "analyzing": "Analyzing... extracting problems and solutions from your files.",
+    "idle": "No solutions yet. Add files and click \"Let's Skid\" to see results here.",
     "title": "Solutions",
     "gesture-hint": "Swipe left or right to switch problems.",
     "status": {
-      "success": "No problems were detected for this image.",
+      "success": "No problems were detected in this file.",
       "stream": "Reasoning...",
       "pending": "Processing in progress...",
-      "failed": "Failed to process this image. Please try again.",
+      "failed": "Failed to process this file. Please try again.",
       "success-with-provider": "Solved by {{provider}}."
     },
-    "focus-region-aria": "Solutions keyboard focus region (Tab/Shift+Tab for problems, Space/Shift+Space for images)",
+    "focus-region-aria": "Solutions keyboard focus region (Tab/Shift+Tab for problems, Space/Shift+Space for files)",
     "tabs": {
       "fallback": "File {{index}}"
     },
-    "photo-label": "{{fileName}} • {{source}}",
+    "file-label": "File {{fileName}} • {{source}}",
     "toggle-preview": "Toggle Preview",
     "streaming": {
       "title": "AI Output",
@@ -217,9 +218,16 @@
     }
   },
   "upload-area": {
-    "take-photo": "Take Photo",
+    "take-photo": "Camera",
     "upload": "Upload Files",
-    "upload-tip": "Images are supported. PDFs require an active Gemini source.",
+    "upload-tip": "Images and text files are supported. PDFs require an active Gemini source.",
+    "text-input": {
+      "button": "Text",
+      "title": "Input Problem Text",
+      "description": "Paste or type the problem content directly.",
+      "placeholder": "Enter problem here...",
+      "submit": "Confirm"
+    },
     "camera-help-aria": "Camera help",
     "camera-tip": {
       "title": "Taking photos on different devices",
@@ -355,11 +363,15 @@
       "actions": {
         "upload": {
           "label": "Upload files",
-          "description": "Opens the file picker for selecting images or PDFs."
+          "description": "Opens the file picker for selecting files."
         },
         "camera": {
           "label": "Take photo",
           "description": "Launches the device camera to capture homework."
+        },
+        "text-input": {
+          "label": "Text Input",
+          "description": "Open text input dialog."
         },
         "adb-screenshot": {
           "label": "ADB screenshot",
@@ -441,7 +453,8 @@
       },
       "ui": {
         "title": "UI",
-        "show-qwen-hint": "Show Qwen3 service tip"
+        "show-qwen-hint": "Show Qwen3 service tip",
+        "clear-dialog-on-submit": "Clear dialog after submit"
       },
       "explanation": {
         "title": "Explanation Mode",
@@ -550,13 +563,13 @@
         "description": "Please copy manually."
       }
     },
-    "source-image": "Source image:",
+    "source-image": "Source file:",
     "open-preview": "open preview",
     "navigation": {
       "prev-problem": "Prev",
       "next-problem": "Next",
-      "prev-image": "⟵ Image",
-      "next-image": "Image ⟶"
+      "prev-image": "⟵ File",
+      "next-image": "File ⟶"
     },
     "chat": {
       "button": "Chat about this",

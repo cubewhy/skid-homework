@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import type { AiChatMessage } from "./chat-types";
 import { BaseAiClient } from "./base-client";
+import { base64Decoder } from "@/utils/encoding";
 
 export type OpenAiModel = {
   name: string;
@@ -34,7 +35,9 @@ export class OpenAiClient extends BaseAiClient {
     media: string,
     mimeType: string,
     prompt?: string,
-    model = "gpt-4o-mini",
+    // replacing with gpt-5.2 as the default model since GPT-4o and older models are retiring.
+    // see https://openai.com/index/retiring-gpt-4o-and-older-models/
+    model = "gpt-5.2",
     callback?: (text: string) => void,
   ) {
     const messages: ChatCompletionMessageParam[] = [];
@@ -62,13 +65,39 @@ export class OpenAiClient extends BaseAiClient {
       });
     }
 
-    contentParts.push({
-      type: "image_url",
-      image_url: {
-        url: `data:${mimeType};base64,${media}`,
-        detail: "auto",
-      },
-    });
+    if (mimeType.startsWith("image/")) {
+      contentParts.push({
+        type: "image_url",
+        image_url: {
+          url: `data:${mimeType};base64,${media}`,
+          detail: "auto",
+        },
+      });
+    } else if (mimeType === "application/pdf") {
+      console.error("PDF media type is not directly supported for completion API.");
+    } else {
+      try {
+        let charset = "utf-8";
+        const charsetMatch = mimeType.match(/charset=([^;]+)/i);
+        if (charsetMatch && charsetMatch[1]) {
+          charset = charsetMatch[1].trim();
+        }
+        let text: string;
+        try {
+          text = await base64Decoder(media, charset);
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        } catch (err) {
+          // Fallback to utf-8 if the specified charset is not supported by TextDecoder
+          text = await base64Decoder(media, "utf-8");
+        }
+        contentParts.push({
+          type: "text",
+          text: `\n\n[File Content]\n${text}\n\n`,
+        });
+      } catch (e) {
+        throw new Error("Failed to decode base64 text: " + (e instanceof Error ? e.message : String(e)));
+      }
+    }
 
     messages.push({
       role: "user",
@@ -83,7 +112,7 @@ export class OpenAiClient extends BaseAiClient {
    */
   async sendChat(
     messages: AiChatMessage[],
-    model = "gpt-4o-mini",
+    model = "gpt-5.2",
     callback?: (text: string) => void,
   ) {
     const openAiMessages: ChatCompletionMessageParam[] = [];

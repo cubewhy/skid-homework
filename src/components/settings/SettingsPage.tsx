@@ -106,6 +106,8 @@ export default function SettingsPage() {
     resetKeybindings,
     devtoolsEnabled,
     setDevtoolsState,
+    clearDialogOnSubmit,
+    setClearDialogOnSubmit,
   } = useSettingsStore((s) => s);
 
   const { theme: activeTheme, setTheme } = useTheme();
@@ -235,6 +237,11 @@ export default function SettingsPage() {
         action: "camera" as ShortcutAction,
         label: translateSettings("shortcuts.actions.camera.label"),
         description: translateSettings("shortcuts.actions.camera.description"),
+      },
+      {
+        action: "textInput" as ShortcutAction,
+        label: translateSettings("shortcuts.actions.text-input.label"),
+        description: translateSettings("shortcuts.actions.text-input.description"),
       },
       !isCompact && {
         action: "adbScreenshot" as ShortcutAction,
@@ -603,6 +610,17 @@ export default function SettingsPage() {
                 onCheckedChange={(state) => setDevtoolsState(Boolean(state))}
               />
               <Label htmlFor="devtools-enabled">Enable Devtools</Label>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <Checkbox
+                id="clear-dialog-on-submit"
+                checked={clearDialogOnSubmit}
+                onCheckedChange={(state) => setClearDialogOnSubmit(Boolean(state))}
+              />
+              <Label htmlFor="clear-dialog-on-submit">
+                {t("advanced.ui.clear-dialog-on-submit")}
+              </Label>
             </div>
 
             <div className="flex items-center gap-3">

@@ -30,6 +30,7 @@ import { useShortcut } from "@/hooks/use-shortcut";
 import OpenCVLoader from "../OpenCVLoader";
 import { getEnabledToolCallingPrompts } from "@/ai/prompts/prompt-manager";
 import { useStoreInitialization } from "@/hooks/use-store-initialization";
+import { isTextMimeType } from "@/utils/file-utils";
 
 export default function ScanPage() {
   const { t } = useTranslation("commons", { keyPrefix: "scan-page" });
@@ -115,6 +116,10 @@ export default function ScanPage() {
       let rejectedPdf = false;
       const arr = Array.from(files).filter((f) => {
         if (f.type.startsWith("image/")) {
+          return true;
+        }
+
+        if (isTextMimeType(f.type, f.name)) {
           return true;
         }
 
@@ -307,7 +312,7 @@ export default function ScanPage() {
         console.log(`Processing ${item.id}`);
 
         const buf = await item.file.arrayBuffer();
-        const base64 = uint8ToBase64(new Uint8Array(buf));
+        const base64 = await uint8ToBase64(new Uint8Array(buf));
 
         let lastError: unknown = null;
 

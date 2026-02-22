@@ -19,14 +19,12 @@ import { useTranslation } from "react-i18next";
 
 export type PreviewListProps = {
   layout: "default" | "mobile";
-  onDrop: (e: React.DragEvent<HTMLDivElement>) => void;
   removeItem: (id: string) => void;
   isDragging: boolean;
 };
 
 export default function PreviewList({
   layout,
-  onDrop,
   removeItem,
   isDragging,
 }: PreviewListProps) {
@@ -70,20 +68,22 @@ export default function PreviewList({
         {isMobileLayout ? (
           <div
             className="-mx-1 flex snap-x gap-4 overflow-x-auto px-1 pb-2"
-            onDrop={onDrop}
           >
             {renderItems()}
           </div>
         ) : (
-          <ScrollArea className="rounded-lg">
+          <ScrollArea
+            className={cn(
+              "rounded-lg flex-1 border p-4",
+              isDragging
+                ? "border-indigo-400 bg-indigo-500/10"
+                : "border-white/15",
+            )}
+          >
             <div
               className={cn(
-                "grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4",
-                isDragging
-                  ? "border-indigo-400 bg-indigo-500/10"
-                  : "border-white/15",
+                "grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 content-start",
               )}
-              onDrop={onDrop}
             >
               {renderItems()}
             </div>

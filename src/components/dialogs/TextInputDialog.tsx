@@ -13,6 +13,7 @@ import {
 import { Kbd } from "../ui/kbd";
 import { Textarea } from "../ui/textarea";
 import { useState } from "react";
+import { useSettingsStore } from "@/store/settings-store";
 
 export type TextInputDialogProps = {
   trigger: React.ReactNode;
@@ -42,13 +43,17 @@ export const TextInputDialog = ({
   allowEmpty,
 }: TextInputDialogProps) => {
   const [inputValue, setInputValue] = useState(initialValue ?? "");
+  const clearDialogOnSubmit = useSettingsStore((s) => s.clearDialogOnSubmit);
 
   const handleSubmit = () => {
-    onSubmit(inputValue);
+    onSubmit(inputValue.trim());
+    if (clearDialogOnSubmit) {
+      setInputValue("");
+    }
   };
 
   const onKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
-    if (e.ctrlKey && e.key === "Enter" && (allowEmpty || inputValue)) {
+    if (e.ctrlKey && e.key === "Enter" && (allowEmpty || inputValue.trim())) {
       e.preventDefault();
       onOpenChange?.(false);
       handleSubmit();
@@ -76,7 +81,7 @@ export const TextInputDialog = ({
               type="button"
               variant="secondary"
               onClick={handleSubmit}
-              disabled={!(inputValue || allowEmpty) || isSubmitting}
+              disabled={!(inputValue.trim() || allowEmpty) || isSubmitting}
             >
               {isSubmitting && <Loader2 className="animate-spin mr-2" />}
               {submitText} <Kbd>Ctrl+Enter</Kbd>

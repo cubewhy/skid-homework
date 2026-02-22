@@ -67,7 +67,7 @@ export const ImproveSolutionDialog = forwardRef<
     }
 
     const buf = await entry.item.file.arrayBuffer();
-    const base64 = uint8ToBase64(new Uint8Array(buf));
+    const base64 = await uint8ToBase64(new Uint8Array(buf));
 
     const prompt = renderImproveXml({
       user_suggestion: improveSolutionPrompt,

@@ -81,7 +81,7 @@ export default function PreviewItem({
 
           <button
             className={twMerge(
-              "absolute right-2 top-2 rounded-full bg-black/40 p-1.5 text-white/90 backdrop-blur transition hover:bg-black/60",
+              "absolute right-2 top-2 rounded-full bg-black/40 p-1.5 text-white/90 backdrop-blur transition hover:bg-black/60 cursor-pointer",
               !isMobile && "hidden group-hover:block",
             )}
             onClick={(e) => {

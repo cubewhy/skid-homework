@@ -55,7 +55,7 @@ export class GeminiAi extends BaseAiClient {
     media: string,
     mimeType: string,
     prompt?: string,
-    model = "gemini-2.5-pro",
+    model = "gemini-3-pro-preview",
     callback?: (text: string) => void,
   ) {
     const contents = [];
@@ -116,7 +116,7 @@ export class GeminiAi extends BaseAiClient {
 
   async sendChat(
     messages: AiChatMessage[],
-    model = "gemini-2.5-pro",
+    model = "gemini-3-pro-preview",
     callback?: (text: string) => void,
   ) {
     const contents = [];

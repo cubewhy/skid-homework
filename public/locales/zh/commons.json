@@ -13,7 +13,7 @@
     "scan": "开始打滑",
     "chat": "聊天",
     "settings": "设置",
-    "title": "上传照片",
+    "title": "添加作业",
     "global-traits": {
       "trigger": "全局提示词编辑器",
       "title": "编辑全局提示词",
@@ -25,18 +25,19 @@
   "preview": {
     "drag-tip": "你可以把文件拖动到这个窗口中, 或者粘贴屏幕截图",
     "drag-tip-mobile": "轻触卡片即可放大，左右滑动快速浏览。",
+    "supported-types": "支持图片、文本、Markdown、JSON 等格式",
     "no-files": "没有文件 上传或拍照以开始",
     "title": "预览",
-    "tip": "提示：双击以在解决方案区域聚焦图像，单击图片预览大图",
-    "image-alt": "作业预览图",
+    "tip": "提示：双击以在解决方案区域聚焦文件，单击文件全屏预览",
+    "image-alt": "作业预览",
     "file-type": {
       "pdf": "PDF",
       "unknown": "未知类型"
     },
     "drop-cancel": "拖到这里取消",
     "remove": {
-      "menu-item": "移除图片",
-      "aria": "移除图片"
+      "menu-item": "移除文件",
+      "aria": "移除文件"
     },
     "rename": {
       "menu-item": "重命名",
@@ -56,7 +57,7 @@
     "mobile": {
       "status": "已有 {{count}} 个文件",
       "status_plural": "已有 {{count}} 个文件",
-      "empty": "先添加照片或 PDF 开始使用。",
+      "empty": "先添加文件或 PDF 开始使用。",
       "hint-ready": "可以开始识别了，准备好后点击「开始打滑」。",
       "hint-pdf": "启用 Gemini 源即可支持 PDF 上传。",
       "tabs": {
@@ -79,7 +80,7 @@
       },
       "all-processed": {
         "title": "全部已处理",
-        "description": "没有待处理或失败的图片了。"
+        "description": "没有待处理或失败的文件了。"
       },
       "working": {
         "title": "正在处理...",
@@ -167,22 +168,22 @@
     }
   },
   "solutions": {
-    "analyzing": "正在分析... 正在从你的图片中提取问题和解决方案",
-    "idle": "点击\"开始打滑\"将图片发送给AI以在这里查看结果",
+    "analyzing": "正在分析... 正在从你的文件中提取问题和解决方案",
+    "idle": "点击\"开始打滑\"将文件发送给AI以在这里查看结果",
     "title": "解决方案",
     "gesture-hint": "左右滑动切换题目。",
     "status": {
-      "success": "这张图片没有检测到题目。",
+      "success": "该文件没有检测到题目。",
       "stream": "正在推理...",
       "pending": "正在处理中...",
       "failed": "处理失败，请重试。",
       "success-with-provider": "由 {{provider}} 处理成功。"
     },
-    "focus-region-aria": "解决方案键盘聚焦区域（Tab/Shift+Tab 切换题目，空格/Shift+空格切换图片）",
+    "focus-region-aria": "解决方案键盘聚焦区域（Tab/Shift+Tab 切换题目，空格/Shift+空格切换文件）",
     "tabs": {
       "fallback": "文件 {{index}}"
     },
-    "photo-label": "照片 {{index}} • {{source}}",
+    "file-label": "文件 {{fileName}} • {{source}}",
     "toggle-preview": "切换预览",
     "streaming": {
       "title": "AI 输出",
@@ -219,7 +220,14 @@
   "upload-area": {
     "take-photo": "拍照",
     "upload": "上传文件",
-    "upload-tip": "支持图片；PDF 需要启用 Gemini 源。",
+    "upload-tip": "支持图片和文本；PDF 需要启用 Gemini 源。",
+    "text-input": {
+      "button": "文本",
+      "title": "输入题目文本",
+      "description": "直接粘贴或输入题目内容。",
+      "placeholder": "在此输入题目...",
+      "submit": "确认"
+    },
     "camera-help-aria": "相机使用说明",
     "camera-tip": {
       "title": "在不同的设备上拍摄照片",
@@ -355,11 +363,15 @@
       "actions": {
         "upload": {
           "label": "上传文件",
-          "description": "打开文件选择器，挑选图片或 PDF。"
+          "description": "打开文件选择器，挑选文件或 PDF。"
         },
         "camera": {
           "label": "拍照",
           "description": "调用设备相机拍摄作业。"
+        },
+        "text-input": {
+          "label": "文本输入",
+          "description": "打开文本输入对话框。"
         },
         "adb-screenshot": {
           "label": "ADB 截图",
@@ -441,7 +453,8 @@
       },
       "ui": {
         "title": "界面",
-        "show-qwen-hint": "显示 Qwen3 服务提示"
+        "show-qwen-hint": "显示 Qwen3 服务提示",
+        "clear-dialog-on-submit": "提交后清空输入框"
       },
       "explanation": {
         "title": "解析显示模式",
@@ -550,13 +563,13 @@
         "description": "请手动复制。"
       }
     },
-    "source-image": "原始图片：",
+    "source-image": "原始文件：",
     "open-preview": "打开预览",
     "navigation": {
       "prev-problem": "上一题",
       "next-problem": "下一题",
-      "prev-image": "⟵ 图片",
-      "next-image": "图片 ⟶"
+      "prev-image": "⟵ 文件",
+      "next-image": "文件 ⟶"
     },
     "chat": {
       "button": "与 AI 聊聊",

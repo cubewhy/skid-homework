@@ -1,4 +1,4 @@
-import { Camera, MoreVertical, Upload } from "lucide-react";
+import { Camera, MoreVertical, Upload, FileText } from "lucide-react";
 import { Button } from "../ui/button";
 import { toast } from "sonner";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../ui/dialog";
+import { TextInputDialog } from "../dialogs/TextInputDialog";
 import { type FileItem, useProblemsStore } from "@/store/problems-store";
 import { Trans, useTranslation } from "react-i18next";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -29,7 +30,8 @@ import {
   reconnectAdbDevice,
 } from "@/lib/webadb/screenshot";
 import { UnsupportedEnvironmentError } from "@/lib/webadb/manager";
-import { TimeoutError, withTimeout } from "@/utils/timeout.ts";
+import { TimeoutError, withTimeout } from "@/utils/timeout";
+import { generateTextFilename } from "@/utils/file-utils";
 
 export type UploadAreaProps = {
   appendFiles: (files: File[] | FileList, source: FileItem["source"]) => void;
@@ -45,6 +47,7 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
 
   const isWorking = useProblemsStore((s) => s.isWorking);
   const [cameraTipOpen, setCameraTipOpen] = useState(false);
+  const [textInputOpen, setTextInputOpen] = useState(false);
   const [adbBusy, setAdbBusy] = useState(false);
   const [adbBusyMode, setAdbBusyMode] = useState<"connect" | "capture" | null>(
     null,
@@ -55,6 +58,16 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const uploadBtnRef = useRef<HTMLButtonElement | null>(null);
   const cameraBtnRef = useRef<HTMLButtonElement | null>(null);
+
+  const handleTextInput = useCallback(
+    (text: string) => {
+      const filename = generateTextFilename(text);
+      const file = new File([text], filename, { type: "text/plain" });
+      appendFiles([file], "upload");
+      setTextInputOpen(false);
+    },
+    [appendFiles],
+  );
 
   const handleUploadBtnClicked = useCallback(() => {
     if (isWorking || adbBusy) return;
@@ -189,7 +202,14 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
     [handleAdbBtnClicked],
   );
 
-  const fileAccept = allowPdf ? "image/*,application/pdf" : "image/*";
+  const textInputShortcut = useShortcut("textInput", () => {
+    if (isWorking || adbBusy) return;
+    setTextInputOpen(true);
+  }, [isWorking, adbBusy]);
+
+  const fileAccept = allowPdf
+    ? "image/*,application/pdf,text/*,.txt,.md,.json"
+    : "image/*,text/*,.txt,.md,.json";
 
   return (
     <>
@@ -230,10 +250,10 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
             <Upload className="h-5 w-5" />
             {t("upload")}
           </span>
-          {!isCompact && <ShortcutHint shortcut={uploadShortcut} />}
+          <ShortcutHint shortcut={uploadShortcut} />
         </Button>
       </div>
-      <div className={cn("flex gap-2", isCompact && "flex-col")}>
+      <div className={cn("flex gap-2 w-full", isCompact && "flex-col")}>
         <input
           ref={cameraInputRef}
           disabled={isWorking || adbBusy}
@@ -251,19 +271,46 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
           ref={cameraBtnRef}
           variant="secondary"
           className={cn(
-            "flex-1 items-center justify-between",
+            "flex-1 items-center justify-between min-w-0 flex-shrink",
             isCompact && "py-6 text-base font-medium",
           )}
           size={isCompact ? "lg" : "default"}
           disabled={isWorking || adbBusy}
           onClick={handleCameraBtnClicked}
         >
-          <span className="flex items-center gap-2">
-            <Camera className="h-5 w-5" />
-            {t("take-photo")}
+          <span className="flex items-center gap-2 min-w-0 overflow-hidden">
+            <Camera className="h-5 w-5 flex-shrink-0" />
+            <span className="truncate">{t("take-photo")}</span>
           </span>
-          {!isCompact && <ShortcutHint shortcut={cameraShortcut} />}
+          <ShortcutHint shortcut={cameraShortcut} />
         </Button>
+        <TextInputDialog
+          isOpen={textInputOpen}
+          onOpenChange={setTextInputOpen}
+          title={t("text-input.title")}
+          description={t("text-input.description")}
+          placeholder={t("text-input.placeholder")}
+          submitText={t("text-input.submit")}
+          onSubmit={handleTextInput}
+          trigger={
+            <Button
+              variant="secondary"
+              className={cn(
+                "flex-1 items-center justify-between min-w-0 flex-shrink",
+                isCompact && "py-6 text-base font-medium mt-2",
+              )}
+              size={isCompact ? "lg" : "default"}
+              disabled={isWorking}
+              onClick={() => setTextInputOpen(true)}
+            >
+              <span className="flex items-center gap-2 min-w-0 overflow-hidden">
+                <FileText className="h-5 w-5 flex-shrink-0" />
+                <span className="truncate">{t("text-input.button")}</span>
+              </span>
+              <ShortcutHint shortcut={textInputShortcut} />
+            </Button>
+          }
+        />
       </div>
       {!isCompact && (
         <div className="flex gap-2">
