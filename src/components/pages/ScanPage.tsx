@@ -121,9 +121,9 @@ export default function ScanPage() {
         if (
           f.type.startsWith("text/") ||
           f.type === "application/json" ||
-          f.name.endsWith(".md") ||
-          f.name.endsWith(".json") ||
-          f.name.endsWith(".txt")
+          f.name.toLowerCase().endsWith(".md") ||
+          f.name.toLowerCase().endsWith(".json") ||
+          f.name.toLowerCase().endsWith(".txt")
         ) {
           return true;
         }

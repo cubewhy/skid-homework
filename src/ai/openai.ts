@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import type { AiChatMessage } from "./chat-types";
 import { BaseAiClient } from "./base-client";
-import { base64ToUtf8 } from "@/utils/encoding";
+import { base64Decoder } from "@/utils/encoding";
 
 export type OpenAiModel = {
   name: string;
@@ -35,7 +35,7 @@ export class OpenAiClient extends BaseAiClient {
     media: string,
     mimeType: string,
     prompt?: string,
-    model = "gpt-4o-mini",
+    model = "gpt-4o",
     callback?: (text: string) => void,
   ) {
     const messages: ChatCompletionMessageParam[] = [];
@@ -71,9 +71,23 @@ export class OpenAiClient extends BaseAiClient {
           detail: "auto",
         },
       });
+    } else if (mimeType === "application/pdf") {
+      console.error("PDF media type is not directly supported for completion API.");
     } else {
       try {
-        const text = base64ToUtf8(media);
+        let charset = "utf-8";
+        const charsetMatch = mimeType.match(/charset=([^;]+)/i);
+        if (charsetMatch && charsetMatch[1]) {
+          charset = charsetMatch[1].trim();
+        }
+        let text: string;
+        try {
+          text = base64Decoder(media, charset);
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        } catch (err) {
+          // Fallback to utf-8 if the specified charset is not supported by TextDecoder
+          text = base64Decoder(media, "utf-8");
+        }
         contentParts.push({
           type: "text",
           text: `\n\n[File Content]\n${text}\n\n`,
