@@ -17,6 +17,7 @@ export type InspectDialogProps = {
   answer: string;
   explanation: string;
   problem: string;
+  onlineSearch?: string;
 
   open: boolean;
   onChange: (state: boolean) => void;
@@ -28,6 +29,7 @@ export default function InspectDialog({
   answer,
   problem,
   explanation,
+  onlineSearch,
 }: InspectDialogProps) {
   // Helper to copy text to clipboard
   const handleCopy = (text: string) => {
@@ -113,6 +115,32 @@ export default function InspectDialog({
                 {explanation}
               </div>
             </div>
+
+            {/* Section: Online Search */}
+            {onlineSearch && (
+              <>
+                <Separator />
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-semibold leading-none tracking-tight text-primary">
+                      {t("online-search")}
+                    </h4>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => handleCopy(onlineSearch)}
+                      title="Copy online search"
+                    >
+                      <Copy className="h-3 w-3" />
+                    </Button>
+                  </div>
+                  <div className="rounded-md bg-muted/50 p-4 text-sm leading-relaxed whitespace-pre-wrap">
+                    {onlineSearch}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </ScrollArea>
 

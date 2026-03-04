@@ -1,7 +1,7 @@
 "use client";
 
 import "katex/dist/katex.min.css";
-import { useRef, useState, type ComponentProps } from "react";
+import { type ComponentProps, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
@@ -197,6 +197,7 @@ export default function SolutionViewer({
         answer={answerText}
         problem={problemText}
         explanation={explanationText}
+        onlineSearch={activeProblem?.onlineSearch}
       />
       <section
         ref={viewerRef}

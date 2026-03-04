@@ -668,7 +668,8 @@
     "close": "关闭窗口",
     "problem": "题目",
     "answer": "答案",
-    "explanation": "解析"
+    "explanation": "解析",
+    "online-search": "联网搜索"
   },
   "sources": {
     "upload": "本地上传",

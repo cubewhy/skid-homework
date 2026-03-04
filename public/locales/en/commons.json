@@ -664,7 +664,8 @@
     "close": "Close",
     "problem": "Problem",
     "answer": "Answer",
-    "explanation": "Explanation"
+    "explanation": "Explanation",
+    "online-search": "Online Search"
   },
   "sources": {
     "upload": "Upload",
