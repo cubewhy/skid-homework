@@ -432,10 +432,9 @@ export default function SettingsPage() {
                   onChange={(combo) => setKeybinding(item.action, combo)}
                   isRecording={recordingAction === item.action}
                   onRecordingChange={(action: SetStateAction<boolean>) => {
-                    const isRecording = recordingAction === item.action;
                     const newRecording =
                       typeof action === "function"
-                        ? action(isRecording)
+                        ? action(recordingAction === item.action)
                         : action;
                     setRecordingAction(newRecording ? item.action : null);
                   }}
