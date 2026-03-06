@@ -579,7 +579,7 @@ export default function SettingsPage() {
                 />
                 <div className="space-y-1">
                   <p className="text-sm font-medium">
-                    {t("thinking.online-search.toggle")}
+                    {t("thinking.online-search.toggle.settings")}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {t("thinking.online-search.desc")}

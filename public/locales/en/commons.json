@@ -449,6 +449,7 @@
       "online-search": {
         "title": "Online search",
         "toggle": {
+          "settings": "Online search",
           "disabled": "Enable online search",
           "enabled": "Enabled online search"
         },

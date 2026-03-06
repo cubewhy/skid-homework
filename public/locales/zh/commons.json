@@ -449,6 +449,7 @@
       "online-search": {
         "title": "联网搜索",
         "toggle": {
+          "settings": "Online search",
           "disabled": "开启联网搜索",
           "enabled": "已开启联网搜索"
         },

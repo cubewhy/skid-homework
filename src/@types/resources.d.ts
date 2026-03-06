@@ -518,7 +518,8 @@ interface Resources {
           "title": "Online search",
           "toggle": {
             "disabled": "Enable online search",
-            "enabled": "Enabled online search"
+            "enabled": "Enabled online search",
+            "settings": "Online search"
           }
         },
         "title": "Thinking Settings",
