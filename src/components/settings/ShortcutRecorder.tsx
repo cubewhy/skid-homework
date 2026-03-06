@@ -1,4 +1,4 @@
-import { Dispatch, SetStateAction, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "../ui/button";
 import { buildShortcutFromKeyboardEvent, formatShortcutLabel } from "@/utils/shortcuts";
 import { useTranslation } from "react-i18next";
@@ -7,7 +7,7 @@ export interface ShortcutRecorderProps {
   value: string;
   onChange: (value: string) => void;
   isRecording?: boolean;
-  onRecordingChange?: Dispatch<SetStateAction<boolean>>;
+  onRecordingChange?: (state: boolean) => void;
 }
 
 export default function ShortcutRecorder({
@@ -17,13 +17,15 @@ export default function ShortcutRecorder({
   onRecordingChange,
 }: ShortcutRecorderProps) {
   const { t } = useTranslation("commons");
-  const [internalRecording, setInternalRecording] = useState(false);
-  const recording = isRecording !== undefined ? isRecording : internalRecording;
-  const setRecording = onRecordingChange || setInternalRecording;
+  const [recording, setRecording] = useState(isRecording ?? false);
 
   const recordingLabel = t("settings-page.shortcuts.recording");
   const unassignedLabel = t("settings-page.shortcuts.unassigned");
   const clearLabel = t("settings-page.shortcuts.clear");
+
+  useEffect(() => {
+    onRecordingChange?.(recording)
+  }, [onRecordingChange, recording]);
 
   useEffect(() => {
     if (!recording) return;
@@ -74,6 +76,7 @@ export default function ShortcutRecorder({
         onClick={() => {
           setRecording((prev) => !prev);
         }}
+        onBlur={() => setRecording(false)}
       >
         {recording ? recordingLabel : label || unassignedLabel}
       </Button>

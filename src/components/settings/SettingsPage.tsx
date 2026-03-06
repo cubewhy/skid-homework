@@ -19,7 +19,6 @@ import { Check, ChevronsUpDown } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  type SetStateAction,
   useCallback,
   useEffect,
   useMemo,
@@ -431,12 +430,10 @@ export default function SettingsPage() {
                   value={keybindings[item.action] ?? ""}
                   onChange={(combo) => setKeybinding(item.action, combo)}
                   isRecording={recordingAction === item.action}
-                  onRecordingChange={(action: SetStateAction<boolean>) => {
-                    const newRecording =
-                      typeof action === "function"
-                        ? action(recordingAction === item.action)
-                        : action;
-                    setRecordingAction(newRecording ? item.action : null);
+                  onRecordingChange={(state) => {
+                    if (!state) { setRecordingAction(null) } else {
+                      setRecordingAction(item.action);
+                    }
                   }}
                 />
               </div>
