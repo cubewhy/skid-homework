@@ -12,7 +12,11 @@ import solvePrompt from "@/ai/prompts/solve.prompt.md";
 import { uint8ToBase64 } from "@/utils/encoding";
 import { parseSolveResponse } from "@/ai/response";
 
-import { type FileItem as FileItem, type ProblemSolution, useProblemsStore, } from "@/store/problems-store";
+import {
+  type FileItem as FileItem,
+  type ProblemSolution,
+  useProblemsStore,
+} from "@/store/problems-store";
 import SolutionsArea from "../solutions/SolutionsArea";
 import { useSettingsStore } from "@/store/settings-store";
 import { processImage } from "@/utils/image-post-processing";
@@ -57,20 +61,16 @@ export default function ScanPage() {
   // Zustand store for AI provider configuration.
   const sources = useAiStore((state) => state.sources);
   const activeSourceId = useAiStore((state) => state.activeSourceId);
+  const currentModel = useAiStore((state) => state.currentModel);
+  const fallbackModel = useAiStore((state) => state.fallbackModel);
   const getClientForSource = useAiStore((state) => state.getClientForSource);
   const allowPdfUploads = useAiStore((state) => state.allowPdfUpload());
 
-  const enabledSources = useMemo(() => {
-    const available = sources.filter(
-      (source) => source.enabled && Boolean(source.apiKey)
+  const activeSource = useMemo(() => {
+    return sources.find(
+      (source) =>
+        source.id === activeSourceId && source.enabled && Boolean(source.apiKey)
     );
-
-    const active = available.find((source) => source.id === activeSourceId);
-    if (!active) {
-      return available;
-    }
-
-    return [active, ...available.filter((source) => source.id !== active.id)];
   }, [sources, activeSourceId]);
 
   // State to track if the AI is currently processing images.
@@ -206,57 +206,112 @@ export default function ScanPage() {
   };
 
   const retryAsyncOperation = async (
-    asyncFn: () => Promise<string>,
+    asyncFn: (model: string) => Promise<string>,
+    sourceName: string,
+    primaryModel: string,
+    fallbackModelName: string | null,
     maxRetries: number = 5,
     initialDelayMs: number = 5000
   ): Promise<string> => {
-    let lastError: Error | undefined;
-    let delay = initialDelayMs;
+    // Helper function to run a single model's retry loop
+    const runWithRetry = async (
+      model: string,
+      logPrefix: string
+    ): Promise<{ result: string } | { error: Error }> => {
+      let lastError: Error | undefined;
+      let delay = initialDelayMs;
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        return await asyncFn();
-      } catch (error) {
-        lastError = error as Error;
+      for (let attempt = 1; attempt <= Math.max(1, maxRetries); attempt++) {
+        try {
+          return { result: await asyncFn(model) };
+        } catch (error) {
+          lastError = error as Error;
 
-        if (isNonRetryableError(error)) {
-          throw error;
-        }
+          if (isNonRetryableError(error)) {
+            return { error: lastError };
+          }
 
-        console.log(
-          `Attempt ${attempt} failed. Retrying in ${delay / 1000}s...`
-        );
+          const errorMessage = lastError?.message || String(error);
+          console.log(
+            `${logPrefix} attempt ${attempt} failed. Retrying in ${delay / 1000}s...`
+          );
 
-        if (attempt < maxRetries) {
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          delay *= 2;
+          if (attempt < Math.max(1, maxRetries)) {
+            toast.warning(t("toasts.retry.title"), {
+              description: t("toasts.retry.description", {
+                attempt,
+                error: errorMessage.slice(0, 100),
+                delay: Math.round(delay / 1000),
+              }),
+            });
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            delay *= 2;
+          }
         }
       }
+
+      return { error: lastError ?? new Error("Unknown AI failure") };
+    };
+
+    // Try with primary model first
+    const primaryResult = await runWithRetry(primaryModel, "Primary model");
+    if ("result" in primaryResult) {
+      return primaryResult.result;
     }
-    throw lastError ?? new Error("Unknown AI failure");
+
+    // Check if primary error is non-retryable
+    if (isNonRetryableError(primaryResult.error)) {
+      throw primaryResult.error;
+    }
+
+    // Primary model exhausted, try fallback model if available
+    if (fallbackModelName) {
+      toast.info(t("toasts.fallback.title"), {
+        description: t("toasts.fallback.description", {
+          model: fallbackModelName,
+        }),
+      });
+
+      const fallbackResult = await runWithRetry(fallbackModelName, "Fallback");
+      if ("result" in fallbackResult) {
+        return fallbackResult.result;
+      }
+
+      // Check if fallback error is non-retryable
+      if (isNonRetryableError(fallbackResult.error)) {
+        throw fallbackResult.error;
+      }
+    }
+
+    // All retries exhausted
+    if (maxRetries > 0) {
+      toast.error(t("toasts.retry-exhausted.title"), {
+        description: t("toasts.retry-exhausted.description", {
+          source: sourceName,
+          maxRetries,
+        }),
+      });
+    }
+
+    throw primaryResult.error;
   };
 
   /**
    * Main function to start the scanning process.
-   * It polls through the configured AI sources until one succeeds per item.
+   * Uses the active AI source to process items.
    */
   const startScan = async () => {
-    const availableSources = enabledSources;
-
-    if (!availableSources.length) {
+    if (!activeSource) {
       toast(t("toasts.no-source.title"), {
         description: t("toasts.no-source.description"),
       });
       return;
     }
 
-    const invalidSource = availableSources.find(
-      (source) => !source.model || source.model.length === 0
-    );
-    if (invalidSource) {
+    if (!currentModel || currentModel.length === 0) {
       toast(t("toasts.no-model.title"), {
         description: t("toasts.no-model.description", {
-          provider: invalidSource.name,
+          provider: activeSource.name,
         }),
       });
       return;
@@ -311,79 +366,71 @@ export default function ScanPage() {
         const buf = await item.file.arrayBuffer();
         const base64 = await uint8ToBase64(new Uint8Array(buf));
 
-        let lastError: unknown = null;
-
         updateSolution(item.id, {
           status: "processing",
         });
 
-        for (const source of availableSources) {
-          try {
-            const aiClient = getClientForSource(source.id);
-            if (!aiClient) {
-              throw new Error(
-                t("errors.missing-key", { provider: source.name })
-              );
-            }
+        const aiClient = getClientForSource(activeSource.id);
+        if (!aiClient) {
+          throw new Error(
+            t("errors.missing-key", { provider: activeSource.name })
+          );
+        }
 
-            const promptPrompt = source.traits
-              ? `\nUser defined prompts:
+        const promptPrompt = activeSource.traits
+          ? `\nUser defined prompts:
 <prompt>
-${source.traits}
+${activeSource.traits}
 </prompt>
 `
-              : "";
+          : "";
 
-            const traitsPrompt = traits
-              ? `\nUser defined traits:
+        const traitsPrompt = traits
+          ? `\nUser defined traits:
 <traits>
 ${traits}
 </traits>
 `
-              : "";
+          : "";
 
-            aiClient.addSystemPrompt(solvePrompt);
-            aiClient.addSystemPrompt(promptPrompt + traitsPrompt);
+        aiClient.addSystemPrompt(solvePrompt);
+        aiClient.addSystemPrompt(promptPrompt + traitsPrompt);
 
-            aiClient.setAvailableTools(getEnabledToolCallingPrompts());
+        aiClient.setAvailableTools(getEnabledToolCallingPrompts());
 
-            clearStreamedOutput(item.id);
+        clearStreamedOutput(item.id);
 
-            const resText = await retryAsyncOperation(() =>
-              aiClient.sendMedia(
-                {
-                  data: base64,
-                  mimeType: item.mimeType,
-                  name: item.displayName,
-                },
-                undefined,
-                source.model,
-                (text) => appendStreamedOutput(item.id, text),
-                { onlineSearch: onlineSearchEnabled }
-              )
-            );
+        const resText = await retryAsyncOperation(
+          (model) =>
+            aiClient.sendMedia(
+              {
+                data: base64,
+                mimeType: item.mimeType,
+                name: item.displayName,
+              },
+              undefined,
+              model,
+              (text) => appendStreamedOutput(item.id, text),
+              { onlineSearch: onlineSearchEnabled }
+            ),
+          activeSource.name,
+          currentModel,
+          fallbackModel,
+          activeSource.maxRetries ?? 5
+        );
 
-            const res = parseSolveResponse(resText);
-            if (!res) {
-              throw new Error(t("errors.parsing-failed"));
-            }
-
-            updateSolution(item.id, {
-              status: "success",
-              problems: res.problems ?? [],
-              aiSourceId: source.id,
-            });
-
-            updateItemStatus(item.id, "success");
-            return;
-          } catch (error) {
-            lastError = error;
-            console.error(`Source ${source.name} failed for ${item.id}`, error);
-            clearStreamedOutput(item.id);
-          }
+        const res = parseSolveResponse(resText);
+        if (!res) {
+          throw new Error(t("errors.parsing-failed"));
         }
 
-        throw lastError ?? new Error("All AI sources exhausted");
+        updateSolution(item.id, {
+          status: "success",
+          problems: res.problems ?? [],
+          aiSourceId: activeSource.id,
+        });
+
+        updateItemStatus(item.id, "success");
       };
 
       // add to orderedSolutions

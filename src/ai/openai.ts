@@ -56,11 +56,13 @@ export class OpenAiClient extends BaseAiClient {
   constructor(
     apiKey: string,
     baseUrl?: string,
-    useResponsesApi = false,
-    webSearchToolType?: string,
+    useResponsesApi = true,
+    webSearchToolType?: string
   ) {
     super();
-    this.useResponsesApi = useResponsesApi;
+    // Preserve legacy behavior for existing sources that may pass `undefined`
+    // while keeping `true` as the default for new callers.
+    this.useResponsesApi = useResponsesApi ?? false;
     this.webSearchToolType = webSearchToolType;
     this.client = new OpenAI({
       apiKey,
@@ -77,27 +79,27 @@ export class OpenAiClient extends BaseAiClient {
     prompt?: string,
     model = "gpt-5.2",
     callback?: (text: string) => void,
-    options?: { onlineSearch?: boolean },
+    options?: { onlineSearch?: boolean }
   ) {
     if (!this.useResponsesApi) {
       if (options?.onlineSearch) {
         toast.error(
           i18n.t("ai-client.openai.requires-responses-api-online-search", {
             ns: "commons",
-          }),
+          })
         );
         throw new NonRetryableError(
-          "Online search requires Responses API to be enabled.",
+          "Online search requires Responses API to be enabled."
         );
       }
       if (file.mimeType === "application/pdf") {
         toast.error(
           i18n.t("ai-client.openai.requires-responses-api-pdf", {
             ns: "commons",
-          }),
+          })
         );
         throw new NonRetryableError(
-          "PDF processing requires Responses API to be enabled.",
+          "PDF processing requires Responses API to be enabled."
         );
       }
       return this._sendMediaLegacy(file, prompt, model, callback);
@@ -110,7 +112,7 @@ export class OpenAiClient extends BaseAiClient {
     file: AiFile,
     prompt?: string,
     model = "gpt-5.2",
-    callback?: (text: string) => void,
+    callback?: (text: string) => void
   ) {
     const { data: media, mimeType, name } = file;
     const messages: ChatCompletionMessageParam[] = [];
@@ -166,7 +168,7 @@ export class OpenAiClient extends BaseAiClient {
       } catch (e) {
         throw new Error(
           "Failed to decode base64 text: " +
-            (e instanceof Error ? e.message : String(e)),
+            (e instanceof Error ? e.message : String(e))
         );
       }
     }
@@ -184,7 +186,7 @@ export class OpenAiClient extends BaseAiClient {
     prompt?: string,
     model = "gpt-5.2",
     callback?: (text: string) => void,
-    options?: { onlineSearch?: boolean },
+    options?: { onlineSearch?: boolean }
   ) {
     const { data: media, mimeType, name } = file;
     const messages: ResponseApiMessage[] = [];
@@ -235,16 +237,16 @@ export class OpenAiClient extends BaseAiClient {
     messages: AiChatMessage[],
     model = "gpt-5.2",
     callback?: (text: string) => void,
-    options?: { onlineSearch?: boolean },
+    options?: { onlineSearch?: boolean }
   ) {
     if (!this.useResponsesApi && options?.onlineSearch) {
       toast.error(
         i18n.t("ai-client.openai.requires-responses-api-online-search", {
           ns: "commons",
-        }),
+        })
       );
       throw new NonRetryableError(
-        "Online search requires Responses API to be enabled.",
+        "Online search requires Responses API to be enabled."
       );
     }
 
@@ -257,7 +259,7 @@ export class OpenAiClient extends BaseAiClient {
   private async _sendChatLegacy(
     messages: AiChatMessage[],
     model: string,
-    callback?: (text: string) => void,
+    callback?: (text: string) => void
   ) {
     const openAiMessages: ChatCompletionMessageParam[] = [];
 
@@ -295,7 +297,7 @@ export class OpenAiClient extends BaseAiClient {
     messages: AiChatMessage[],
     model: string,
     callback?: (text: string) => void,
-    options?: { onlineSearch?: boolean },
+    options?: { onlineSearch?: boolean }
   ) {
     const openAiMessages: ResponseApiMessage[] = [];
 
@@ -330,14 +332,14 @@ export class OpenAiClient extends BaseAiClient {
       model,
       openAiMessages,
       callback,
-      options,
+      options
     );
   }
 
   private async _executeStream(
     model: string,
     messages: ChatCompletionMessageParam[],
-    callback?: (text: string) => void,
+    callback?: (text: string) => void
   ): Promise<string> {
     const stream = await this.client.chat.completions.create({
       model,
@@ -378,7 +380,7 @@ export class OpenAiClient extends BaseAiClient {
     model: string,
     messages: ResponseApiMessage[],
     callback?: (text: string) => void,
-    options?: { onlineSearch?: boolean },
+    options?: { onlineSearch?: boolean }
   ): Promise<string> {
     const toolType = this.getWebSearchToolType(model);
 
@@ -390,7 +392,7 @@ export class OpenAiClient extends BaseAiClient {
         this.client as unknown as {
           responses: {
             create: (
-              opts: unknown,
+              opts: unknown
             ) => Promise<AsyncIterable<{ type: string; delta?: string }>>;
           };
         }
@@ -409,13 +411,13 @@ export class OpenAiClient extends BaseAiClient {
         message.includes("Web search options not supported");
       if (options?.onlineSearch && notSupported) {
         console.warn(
-          `Web search not supported for model ${model}; retrying Responses API without search tools.`,
+          `Web search not supported for model ${model}; retrying Responses API without search tools.`
         );
         toast.warning(
           i18n.t("ai-client.openai.web-search-not-supported", {
             ns: "commons",
             model,
-          }),
+          })
         );
         return this._executeResponsesStream(model, messages, callback, {
           onlineSearch: false,

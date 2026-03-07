@@ -28,6 +28,7 @@ export default function AISourceManager() {
 
   const sources = useAiStore((s) => s.sources);
   const activeSourceId = useAiStore((s) => s.activeSourceId);
+  const currentModel = useAiStore((s) => s.currentModel);
   const setActiveSource = useAiStore((s) => s.setActiveSource);
   const toggleSource = useAiStore((s) => s.toggleSource);
   const removeSource = useAiStore((s) => s.removeSource);
@@ -43,7 +44,7 @@ export default function AISourceManager() {
       provider: source.provider,
       baseUrl: source.baseUrl,
       key: source.apiKey ?? undefined,
-      model: source.model,
+      model: currentModel,
     };
 
     // convert to url
@@ -66,7 +67,7 @@ export default function AISourceManager() {
       toast.success(
         t("sources.remove.success", {
           name: target.name,
-        }),
+        })
       );
     }
   };
@@ -122,7 +123,7 @@ export default function AISourceManager() {
                   key={source.id}
                   className={cn(
                     "flex flex-col gap-3 rounded-md border border-border p-3 md:flex-row md:items-center md:justify-between",
-                    isActive && "border-primary",
+                    isActive && "border-primary"
                   )}
                   onClick={() => setActiveSource(source.id)}
                 >

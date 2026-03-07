@@ -1,48 +1,36 @@
 "use client";
 
 import { useQwenHintAutoToggle } from "@/hooks/useQwenHintAutoToggle";
-import { cn } from "@/lib/utils";
-import {
-  type AiModelSummary,
-  type AiProvider,
-  DEFAULT_GEMINI_BASE_URL,
-  DEFAULT_OPENAI_BASE_URL,
-  useAiStore,
-} from "@/store/ai-store";
+import { type AiProvider, DEFAULT_GEMINI_BASE_URL, DEFAULT_OPENAI_BASE_URL, useAiStore, } from "@/store/ai-store";
 import {
   type LanguagePreference,
   type ShortcutAction,
   type ThemePreference,
   useSettingsStore,
 } from "@/store/settings-store";
-import { Check, ChevronsUpDown } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { useAvailableModels } from "@/hooks/use-available-models";
 import ShortcutRecorder from "./ShortcutRecorder";
 import { useTheme } from "../theme-provider";
 import { Button } from "../ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, } from "../ui/card";
 import { Checkbox } from "../ui/checkbox";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../ui/command";
 import { Input } from "../ui/input";
 import { Kbd } from "../ui/kbd";
 import { Label } from "../ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from "../ui/select";
 import { Slider } from "../ui/slider";
 import { Textarea } from "../ui/textarea";
 import AIAPICredentialsManager from "./AIAPICredentialsManager";
 import AISourceManager from "./AISourceManager";
 import ExplanationModeSelector from "./ExplanationModeSelector";
+import ModelSelector, { CUSTOM_MODEL_VALUE } from "../ui/model-selector.tsx";
+import { RefreshCw } from "lucide-react";
 
 export const DEFAULT_BASE_BY_PROVIDER: Record<AiProvider, string> = {
   gemini: DEFAULT_GEMINI_BASE_URL,
@@ -81,8 +69,26 @@ export default function SettingsPage() {
 
   const sources = useAiStore((s) => s.sources);
   const activeSourceId = useAiStore((s) => s.activeSourceId);
+  const setActiveSource = useAiStore((s) => s.setActiveSource);
+  const fallbackModel = useAiStore((s) => s.fallbackModel);
+  const currentModel = useAiStore((s) => s.currentModel);
   const updateSource = useAiStore((s) => s.updateSource);
-  const getClientForSource = useAiStore((s) => s.getClientForSource);
+  const setFallbackModel = useAiStore((s) => s.setFallbackModel);
+  const setCurrentModel = useAiStore((s) => s.setCurrentModel);
+  const isCustomModel = useAiStore((s) => s.isCustomModel);
+  const setIsCustomModel = useAiStore((s) => s.setIsCustomModel);
+  const isCustomFallback = useAiStore((s) => s.isCustomFallback);
+  const setIsCustomFallback = useAiStore((s) => s.setIsCustomFallback);
+  const customModelName = useAiStore((s) => s.customModelName);
+  const setCustomModelName = useAiStore((s) => s.setCustomModelName);
+  const customModelSourceId = useAiStore((s) => s.customModelSourceId);
+  const setCustomModelSourceId = useAiStore((s) => s.setCustomModelSourceId);
+  const customFallbackName = useAiStore((s) => s.customFallbackName);
+  const setCustomFallbackName = useAiStore((s) => s.setCustomFallbackName);
+  const customFallbackSourceId = useAiStore((s) => s.customFallbackSourceId);
+  const setCustomFallbackSourceId = useAiStore(
+    (s) => s.setCustomFallbackSourceId
+  );
 
   const {
     imageEnhancement: imageEnhancement,
@@ -111,25 +117,36 @@ export default function SettingsPage() {
   const { theme: activeTheme, setTheme } = useTheme();
 
   const [recordingAction, setRecordingAction] = useState<ShortcutAction | null>(
-    null,
+    null
   );
 
   const activeSource = useMemo(
     () => sources.find((source) => source.id === activeSourceId) ?? sources[0],
-    [sources, activeSourceId],
+    [sources, activeSourceId]
   );
   useQwenHintAutoToggle(sources, showQwenHint, setShowQwenHint);
 
   const localTraits = useMemo(() => activeSource?.traits ?? "", [activeSource]);
   const localThinkingBudget = useMemo(
     () => activeSource?.thinkingBudget ?? 8192,
-    [activeSource],
+    [activeSource]
   );
 
-  const [availableModels, setAvailableModels] = useState<AiModelSummary[]>([]);
-  const [modelPopoverOpen, setModelPopoverOpen] = useState(false);
+  // Get enabled sources for custom model provider selector
+  const enabledSources = useMemo(
+    () => sources.filter((source) => source.enabled && source.apiKey),
+    [sources]
+  );
 
   const router = useRouter();
+
+  // Use shared hook for available models
+  const {
+    sourceModelsMap,
+    isLoading: modelsLoading,
+    forceRefetch,
+  } = useAvailableModels();
+
   const handleBack = useCallback(() => {
     if (navTargetPath) {
       router.push(navTargetPath);
@@ -160,7 +177,7 @@ export default function SettingsPage() {
         label: t("appearance.theme.options.dark"),
       },
     ],
-    [t],
+    [t]
   );
 
   const languageOptions = useMemo(
@@ -174,7 +191,7 @@ export default function SettingsPage() {
         label: t("appearance.language.options.zh"),
       },
     ],
-    [t],
+    [t]
   );
 
   const handleThemeSelect = (value: ThemePreference) => {
@@ -189,43 +206,12 @@ export default function SettingsPage() {
     }
   };
 
-  const loadModels = useCallback(async () => {
-    if (!activeSource?.id || !activeSource.apiKey) {
-      setAvailableModels([]);
-      return;
-    }
-
-    try {
-      const client = getClientForSource(activeSource.id);
-      if (!client?.getAvailableModels) {
-        setAvailableModels([]);
-        return;
-      }
-
-      const models = await client.getAvailableModels();
-      setAvailableModels(models);
-    } catch (error) {
-      console.error("Failed to fetch models", error);
-      setAvailableModels([]);
-      toast.error(
-        t("model.fetch.error", {
-          provider: activeSource.name,
-        }),
-      );
-    }
-  }, [activeSource, getClientForSource, t]);
-
-  useEffect(() => {
-    const execute = async () => {
-      await loadModels();
-    };
-
-    execute();
-  }, [loadModels]);
+  const [modelPopoverOpen, setModelPopoverOpen] = useState(false);
+  const [fallbackPopoverOpen, setFallbackPopoverOpen] = useState(false);
 
   const translateSettings = useCallback(
     (key: string) => t(key as never) as string,
-    [t],
+    [t]
   );
 
   const shortcutItems = useMemo(() => {
@@ -239,51 +225,51 @@ export default function SettingsPage() {
         action: "textInput" as ShortcutAction,
         label: translateSettings("shortcuts.actions.text-input.label"),
         description: translateSettings(
-          "shortcuts.actions.text-input.description",
+          "shortcuts.actions.text-input.description"
         ),
       },
       !isCompact && {
         action: "adbScreenshot" as ShortcutAction,
         label: translateSettings("shortcuts.actions.adb-screenshot.label"),
         description: translateSettings(
-          "shortcuts.actions.adb-screenshot.description",
+          "shortcuts.actions.adb-screenshot.description"
         ),
       },
       {
         action: "startScan" as ShortcutAction,
         label: translateSettings("shortcuts.actions.start-scan.label"),
         description: translateSettings(
-          "shortcuts.actions.start-scan.description",
+          "shortcuts.actions.start-scan.description"
         ),
       },
       {
         action: "clearAll" as ShortcutAction,
         label: translateSettings("shortcuts.actions.clear-all.label"),
         description: translateSettings(
-          "shortcuts.actions.clear-all.description",
+          "shortcuts.actions.clear-all.description"
         ),
       },
       {
         action: "openSettings" as ShortcutAction,
         label: translateSettings("shortcuts.actions.open-settings.label"),
         description: translateSettings(
-          "shortcuts.actions.open-settings.description",
+          "shortcuts.actions.open-settings.description"
         ),
       },
       {
         action: "openChat" as ShortcutAction,
         label: translateSettings("shortcuts.actions.open-chat.label"),
         description: translateSettings(
-          "shortcuts.actions.open-chat.description",
+          "shortcuts.actions.open-chat.description"
         ),
       },
       {
         action: "openGlobalTraitsEditor" as ShortcutAction,
         label: translateSettings(
-          "shortcuts.actions.open-global-traits-editor.label",
+          "shortcuts.actions.open-global-traits-editor.label"
         ),
         description: translateSettings(
-          "shortcuts.actions.open-global-traits-editor.description",
+          "shortcuts.actions.open-global-traits-editor.description"
         ),
       },
     ].filter(Boolean) as Array<{
@@ -297,10 +283,24 @@ export default function SettingsPage() {
   const shortcutsDesc = translateSettings("shortcuts.desc");
   const shortcutsResetLabel = translateSettings("shortcuts.reset");
 
-  const handleModelSelect = (model: string) => {
-    if (!activeSource) return;
-    updateSource(activeSource.id, { model });
+  const handleModelChange = (model: string) => {
+    if (model === CUSTOM_MODEL_VALUE) {
+      setIsCustomModel(true);
+    } else {
+      setIsCustomModel(false);
+      setCurrentModel(model);
+    }
     setModelPopoverOpen(false);
+  };
+
+  const handleFallbackChange = (model: string) => {
+    if (model === CUSTOM_MODEL_VALUE) {
+      setIsCustomFallback(true);
+    } else {
+      setIsCustomFallback(false);
+      setFallbackModel(model || null);
+    }
+    setFallbackPopoverOpen(false);
   };
 
   const handleTraitsChange = (value: string) => {
@@ -317,17 +317,6 @@ export default function SettingsPage() {
     if (!activeSource) return;
     updateSource(activeSource.id, { thinkingBudget: value });
   };
-
-  const modelDisplay = useMemo(() => {
-    if (!activeSource) return "";
-    if (!activeSource.model) return t("model.sel.none");
-    const match = availableModels.find(
-      (model) => model.name === activeSource.model,
-    );
-    return match
-      ? match.displayName
-      : t("model.sel.unknown", { name: activeSource.model });
-  }, [activeSource, availableModels, t]);
 
   return (
     <>
@@ -419,7 +408,9 @@ export default function SettingsPage() {
                   onChange={(combo) => setKeybinding(item.action, combo)}
                   isRecording={recordingAction === item.action}
                   onRecordingChange={(state) => {
-                    if (!state) { setRecordingAction(null) } else {
+                    if (!state) {
+                      setRecordingAction(null);
+                    } else {
                       setRecordingAction(item.action);
                     }
                   }}
@@ -439,59 +430,72 @@ export default function SettingsPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between gap-2 flex-wrap">
-              <Popover
+              <ModelSelector
+                sourceModelsMap={sourceModelsMap}
+                value={currentModel}
+                onChange={handleModelChange}
                 open={modelPopoverOpen}
                 onOpenChange={setModelPopoverOpen}
+                allowCustom={true}
+                isCustomSelected={isCustomModel}
+                className="flex-2"
+              />
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => void forceRefetch()}
+                disabled={modelsLoading}
+                title={t("model.refresh")}
               >
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={modelPopoverOpen}
-                    className="flex-2 justify-between"
-                  >
-                    {modelDisplay}
-                    <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="p-0">
-                  <Command>
-                    <CommandInput placeholder={t("model.sel.search")} />
-                    <CommandList>
-                      <CommandEmpty>{t("model.sel.empty")}</CommandEmpty>
-                      <CommandGroup>
-                        {availableModels.map((model) => (
-                          <CommandItem
-                            key={model.name}
-                            value={model.name}
-                            onSelect={(currentValue) => {
-                              handleModelSelect(
-                                currentValue === activeSource?.model
-                                  ? ""
-                                  : currentValue,
-                              );
-                            }}
-                          >
-                            <Check
-                              className={cn(
-                                "mr-2 h-4 w-4",
-                                activeSource?.model === model.name
-                                  ? "opacity-100"
-                                  : "opacity-0",
-                              )}
-                            />
-                            {model.displayName}
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-              <Button variant="outline" onClick={loadModels} className="flex-1">
-                {t("model.refresh")}
+                <RefreshCw
+                  className={`h-4 w-4 ${modelsLoading ? "animate-spin" : ""}`}
+                />
               </Button>
             </div>
+            {isCustomModel && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Select
+                    value={customModelSourceId}
+                    onValueChange={(value) => {
+                      setCustomModelSourceId(value);
+                    }}
+                  >
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue
+                        placeholder={t("model.manual.select-provider")}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {enabledSources.map((source) => (
+                        <SelectItem key={source.id} value={source.id}>
+                          {source.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    id="model-manual"
+                    className="flex-1"
+                    value={customModelName}
+                    onChange={(event) => {
+                      setCustomModelName(event.target.value);
+                    }}
+                    onBlur={() => {
+                      // Only apply custom model when user finishes editing
+                      if (customModelSourceId && customModelName.trim()) {
+                        setActiveSource(customModelSourceId);
+                        setCurrentModel(customModelName.trim());
+                      }
+                    }}
+                    placeholder={t("model.manual.placeholder")}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {t("model.manual.desc")}
+                </p>
+              </div>
+            )}
             <div className="space-y-2">
               <div className="flex items-center gap-3">
                 <Checkbox
@@ -507,18 +511,98 @@ export default function SettingsPage() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="model-manual">{t("model.manual.title")}</Label>
-              <Input
-                id="model-manual"
-                value={activeSource?.model ?? ""}
-                onChange={(event) =>
-                  activeSource &&
-                  updateSource(activeSource.id, { model: event.target.value })
-                }
-                placeholder={t("model.manual.placeholder")}
-              />
+              <Label htmlFor="max-retries">
+                {t("model.max-retries.label")}
+              </Label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <Slider
+                    value={[activeSource?.maxRetries ?? 5]}
+                    onValueChange={(value) => {
+                      if (!activeSource) return;
+                      updateSource(activeSource.id, { maxRetries: value[0] });
+                    }}
+                    min={0}
+                    max={10}
+                    step={1}
+                  />
+                </div>
+                <Input
+                  id="max-retries"
+                  className="w-16"
+                  type="number"
+                  min={0}
+                  max={10}
+                  value={activeSource?.maxRetries ?? 5}
+                  onChange={(event) => {
+                    if (!activeSource) return;
+                    const val = parseInt(event.target.value, 10);
+                    updateSource(activeSource.id, {
+                      maxRetries: isNaN(val)
+                        ? 5
+                        : Math.max(0, Math.min(10, val)),
+                    });
+                  }}
+                />
+              </div>
               <p className="text-xs text-muted-foreground">
-                {t("model.manual.desc")}
+                {t("model.max-retries.tip")}
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label>{t("model.fallback.label")}</Label>
+              <ModelSelector
+                sourceModelsMap={sourceModelsMap}
+                value={fallbackModel}
+                onChange={handleFallbackChange}
+                open={fallbackPopoverOpen}
+                onOpenChange={setFallbackPopoverOpen}
+                allowNone={true}
+                noneLabel={t("model.fallback.none")}
+                allowCustom={true}
+                isCustomSelected={isCustomFallback}
+                excludeModel={currentModel}
+                className="w-full"
+              />
+              {isCustomFallback && (
+                <div className="flex items-center gap-2 mt-2">
+                  <Select
+                    value={customFallbackSourceId}
+                    onValueChange={(value) => {
+                      setCustomFallbackSourceId(value);
+                    }}
+                  >
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue
+                        placeholder={t("model.manual.select-provider")}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {enabledSources.map((source) => (
+                        <SelectItem key={source.id} value={source.id}>
+                          {source.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    className="flex-1"
+                    value={customFallbackName}
+                    onChange={(event) => {
+                      setCustomFallbackName(event.target.value);
+                    }}
+                    onBlur={() => {
+                      // Only apply custom fallback model when user finishes editing
+                      if (customFallbackSourceId && customFallbackName.trim()) {
+                        setFallbackModel(customFallbackName.trim());
+                      }
+                    }}
+                    placeholder={t("model.manual.placeholder")}
+                  />
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                {t("model.fallback.desc")}
               </p>
             </div>
           </CardContent>
@@ -555,8 +639,8 @@ export default function SettingsPage() {
                       handleThinkingBudgetChange(
                         Math.max(
                           128,
-                          Math.min(24576, Number(event.target.value) || 128),
-                        ),
+                          Math.min(24576, Number(event.target.value) || 128)
+                        )
                       )
                     }
                   />

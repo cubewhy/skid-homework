@@ -23,7 +23,7 @@ function trimTitle(text: string, fallback: string) {
 }
 
 function mapMessagesToAi(
-  messages: { role: "user" | "assistant" | "system"; content: string }[],
+  messages: { role: "user" | "assistant" | "system"; content: string }[]
 ): AiChatMessage[] {
   return messages
     .filter((msg) => msg.content && msg.content.trim().length > 0)
@@ -40,6 +40,7 @@ export function useChatLogic() {
 
   const sources = useAiStore((state) => state.sources);
   const activeSourceId = useAiStore((state) => state.activeSourceId);
+  const currentModel = useAiStore((state) => state.currentModel);
   const setActiveSource = useAiStore((state) => state.setActiveSource);
   const getClientForSource = useAiStore((state) => state.getClientForSource);
 
@@ -56,7 +57,7 @@ export function useChatLogic() {
   const messagesMap = useChatStore((state) => state.messages);
 
   const [activeChatId, setActiveChatId] = useState<string | undefined>(
-    undefined,
+    undefined
   );
   const [messageInput, setMessageInput] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -97,7 +98,7 @@ export function useChatLogic() {
     // Fallback: simple title filter while waiting for DB results (optional)
     const lowerQuery = searchQuery.toLowerCase();
     return threads.filter((thread) =>
-      thread.title.toLowerCase().includes(lowerQuery),
+      thread.title.toLowerCase().includes(lowerQuery)
     );
   }, [threads, searchQuery, searchResults]);
 
@@ -110,7 +111,7 @@ export function useChatLogic() {
         router.push("/chat");
       }
     },
-    [router],
+    [router]
   );
 
   useEffect(() => {
@@ -134,18 +135,18 @@ export function useChatLogic() {
 
   const availableSources = useMemo(
     () => sources.filter((source) => source.enabled && Boolean(source.apiKey)),
-    [sources],
+    [sources]
   );
 
   const sourceMap = useMemo(
     () =>
       new Map<string, AiSource>(sources.map((source) => [source.id, source])),
-    [sources],
+    [sources]
   );
 
   const activeThread = useMemo(
     () => threads.find((thread) => thread.id === activeChatId),
-    [threads, activeChatId],
+    [threads, activeChatId]
   );
 
   useEffect(() => {
@@ -198,35 +199,32 @@ export function useChatLogic() {
       setModelInput(activeThread.model);
     } else if (seedData?.model) {
       setModelInput(seedData.model);
-    } else if (resolvedSource) {
-      setModelInput(resolvedSource.model);
     } else {
-      setModelInput("");
+      setModelInput(currentModel);
     }
-  }, [activeThread, resolvedSource, seedData]);
+  }, [activeThread, currentModel, seedData]);
 
   const handleSelectSource = async (sourceId: string) => {
     setCurrentSourceId(sourceId);
     setActiveSource(sourceId);
-    const source = sourceMap.get(sourceId);
-    if (source && !activeThread) setModelInput(source.model);
+    if (!activeThread) setModelInput(currentModel);
 
     if (activeThread) {
       await updateThread(activeThread.id, {
         sourceId,
         updatedAt: Date.now(),
-        model: source?.model,
+        model: currentModel,
       });
     }
   };
 
   const handleNewChat = useCallback(() => {
     navigateToChat(undefined);
-    setModelInput(resolvedSource?.model || "");
+    setModelInput(currentModel);
     setMessageInput("");
     setSeedData(null);
     if (window.innerWidth < 1024) setSidebarOpen(false);
-  }, [resolvedSource, navigateToChat]);
+  }, [currentModel, navigateToChat]);
 
   const handleSend = async () => {
     const trimmed = messageInput.trim();
@@ -236,12 +234,12 @@ export function useChatLogic() {
       toast.error(
         t("errors.missing-key", {
           provider: resolvedSource?.name ?? "Unknown",
-        }),
+        })
       );
       return;
     }
 
-    const modelName = modelInput.trim() || resolvedSource.model;
+    const modelName = modelInput.trim() || currentModel;
     setIsSending(true);
     setMessageInput("");
 
@@ -302,7 +300,7 @@ export function useChatLogic() {
       const history = mapMessagesToAi(
         conversation
           .filter((msg) => msg.id !== assistantMessageId)
-          .map((msg) => ({ role: msg.role, content: msg.content })),
+          .map((msg) => ({ role: msg.role, content: msg.content }))
       );
 
       const aiClient = getClientForSource(resolvedSource.id);
@@ -326,7 +324,7 @@ export function useChatLogic() {
             updateMessage(chatId!, assistantMessageId, { content: aggregated });
           }
         },
-        { onlineSearch: onlineSearchEnabled },
+        { onlineSearch: onlineSearchEnabled }
       );
 
       if (finalContent && finalContent.trim()) {
@@ -380,7 +378,7 @@ export function useChatLogic() {
   const handleDeleteChat = async (chatId: string) => {
     if (
       !window.confirm(
-        t("history.delete-confirm", { defaultValue: "Delete chat?" }),
+        t("history.delete-confirm", { defaultValue: "Delete chat?" })
       )
     )
       return;

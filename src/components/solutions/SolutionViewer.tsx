@@ -54,6 +54,7 @@ export default function SolutionViewer({
   const { t } = useTranslation("commons", { keyPrefix: "solution-viewer" });
   const sources = useAiStore((s) => s.sources);
   const activeSourceId = useAiStore((s) => s.activeSourceId);
+  const currentModel = useAiStore((s) => s.currentModel);
   const router = useRouter();
 
   const viewerRef = useRef<HTMLElement | null>(null);
@@ -61,7 +62,7 @@ export default function SolutionViewer({
   const problemCount = entry.solutions.problems.length;
   const safeIndex = Math.min(
     Math.max(0, selectedProblem),
-    Math.max(0, problemCount - 1),
+    Math.max(0, problemCount - 1)
   );
 
   const activeProblem =
@@ -117,7 +118,7 @@ export default function SolutionViewer({
     }
 
     const availableSources = sources.filter(
-      (source) => source.enabled && source.apiKey,
+      (source) => source.enabled && source.apiKey
     );
     if (availableSources.length === 0) {
       toast.error(t("chat.no-source.title"), {
@@ -149,18 +150,18 @@ export default function SolutionViewer({
       contextSections.push(
         t("chat.context.answer", {
           answer: answerText,
-        }),
+        })
       );
     }
     if (explanationText) {
       contextSections.push(
         t("chat.context.explanation", {
           explanation: explanationText,
-        }),
+        })
       );
     }
     const contextMessage = [t("chat.context.intro"), ...contextSections].join(
-      "\n\n",
+      "\n\n"
     );
 
     const prefillLines: string[] = [
@@ -183,7 +184,7 @@ export default function SolutionViewer({
       prefillMessage,
       contextMessage,
       sourceId: preferredSource.id,
-      model: preferredSource.model,
+      model: currentModel,
     });
     const target = payload ? `/chat?seed=${payload}` : "/chat";
     router.push(target);

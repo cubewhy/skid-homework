@@ -32,15 +32,16 @@ export const ImproveSolutionDialog = forwardRef<
 >(({ entry, activeProblem, updateSolution }, ref) => {
   const sources = useAiStore((s) => s.sources);
   const activeSourceId = useAiStore((s) => s.activeSourceId);
+  const currentModel = useAiStore((s) => s.currentModel);
   const getClientForSource = useAiStore((s) => s.getClientForSource);
   const { appendStreamedOutput, clearStreamedOutput } = useProblemsStore(
-    (s) => s,
+    (s) => s
   );
   const { t } = useTranslation("commons", { keyPrefix: "improve-dialog" });
 
   const enabledSources = useMemo(() => {
     const available = sources.filter(
-      (source) => source.enabled && Boolean(source.apiKey),
+      (source) => source.enabled && Boolean(source.apiKey)
     );
     const active = available.find((source) => source.id === activeSourceId);
     if (!active) {
@@ -90,7 +91,7 @@ export const ImproveSolutionDialog = forwardRef<
         const aiClient = getClientForSource(source.id);
         if (!aiClient) {
           lastError = new Error(
-            t("toasts.no-key.description", { provider: source.name }),
+            t("toasts.no-key.description", { provider: source.name })
           );
           continue;
         }
@@ -118,9 +119,9 @@ ${source.traits}
               name: entry.item.displayName,
             },
             prompt,
-            source.model,
+            currentModel,
             (text) => appendStreamedOutput(entry.item.id, text),
-            { onlineSearch: onlineSearchEnabled },
+            { onlineSearch: onlineSearchEnabled }
           );
 
           const res = parseImproveResponse(resText);

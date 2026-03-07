@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { useTranslation } from "react-i18next";
 import {
+  Check,
+  ChevronsUpDown,
   Menu,
   PanelLeftOpen,
   Settings2,
-  ChevronsUpDown,
-  Check,
 } from "lucide-react";
 
 import type { AiSource } from "@/store/ai-store";
@@ -135,9 +135,6 @@ export function ChatHeader({
                   >
                     <div className="flex items-center gap-2">
                       <span>{source.name}</span>
-                      <span className="text-xs text-muted-foreground ml-2">
-                        {source.model}
-                      </span>
                     </div>
                     {source.id === resolvedSourceId && (
                       <Check className="h-4 w-4" />
