@@ -38,7 +38,6 @@ export default function InitPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useTranslation("commons", { keyPrefix: "init-page" });
-  const { t: tCommon } = useTranslation("commons");
 
   const handleSubmit = (e: SubmitEvent) => {
     e.preventDefault();
@@ -86,8 +85,8 @@ export default function InitPage() {
           </defs>
           <rect width="100%" height="100%" fill="url(#grid)" />
         </svg>
-        <div className="absolute -left-32 -top-32 h-[420px] w-[420px] rounded-full bg-indigo-500/20 blur-3xl" />
-        <div className="absolute bottom-0 right-0 h-[380px] w-[380px] rounded-full bg-fuchsia-500/20 blur-3xl" />
+        <div className="absolute -left-32 -top-32 h-105 w-105 rounded-full bg-indigo-500/20 blur-3xl" />
+        <div className="absolute bottom-0 right-0 h-95 w-95 rounded-full bg-fuchsia-500/20 blur-3xl" />
       </div>
 
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">

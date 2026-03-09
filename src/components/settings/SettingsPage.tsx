@@ -1,8 +1,6 @@
 "use client";
 
-import { cn } from "@/lib/utils";
 import {
-  type AiModelSummary,
   type AiProvider,
   DEFAULT_GEMINI_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,

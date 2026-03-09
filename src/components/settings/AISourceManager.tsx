@@ -1,5 +1,4 @@
 import AddAISourceDialog from "@/components/settings/AddAISourceDialog";
-import { InfoTooltip } from "@/components/InfoTooltip";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -17,8 +16,6 @@ import { useTranslation } from "react-i18next";
 import { DEFAULT_BASE_BY_PROVIDER } from "./SettingsPage";
 import ShareAISourceDialog from "@/components/settings/ShareAISourceDialog";
 import { toast } from "sonner";
-import { useSettingsStore } from "@/store/settings-store";
-import { Badge } from "@/components/ui/badge";
 
 export default function AISourceManager() {
   const { t } = useTranslation("commons", { keyPrefix: "settings-page" });
