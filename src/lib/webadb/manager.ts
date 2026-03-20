@@ -1,9 +1,7 @@
-import { Adb, AdbDaemonTransport } from "@yume-chan/adb";
-import {
-  AdbDaemonWebUsbDevice,
-  AdbDaemonWebUsbDeviceManager,
-} from "@yume-chan/adb-daemon-webusb";
+import {Adb, AdbDaemonTransport} from "@yume-chan/adb";
+import {AdbDaemonWebUsbDevice, AdbDaemonWebUsbDeviceManager,} from "@yume-chan/adb-daemon-webusb";
 import AdbWebCredentialStore from "@yume-chan/adb-credential-web";
+import {isTauri} from "@/lib/tauri/platform";
 
 export interface AdbDevice {
   serial: string;
@@ -22,6 +20,13 @@ export class AdbManager {
   private credentialStore: AdbWebCredentialStore;
 
   constructor() {
+    // WebUSB is disabled in Tauri; use Rust native ADB plugin instead
+    if (isTauri()) {
+      throw new UnsupportedEnvironmentError(
+        "WebUSB is disabled in Tauri desktop builds. Use the native ADB plugin instead.",
+      );
+    }
+
     // ensure WebUSB is supported before initializing the manager
     if (
       typeof navigator === "undefined" ||

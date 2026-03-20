@@ -47,3 +47,12 @@ qodana.yaml
 # serwist
 public/sw.js
 public/sw.js.map
+
+# build output
+out
+src-tauri/target
+
+# local AI Agent Settings
+.claude
+agents.md
+claude.md

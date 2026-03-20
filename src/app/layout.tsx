@@ -1,9 +1,12 @@
 import "../index.css";
 import type {Metadata, Viewport} from "next";
 import Providers from "./providers";
-import {SerwistProvider} from "./serwist";
+import {TauriAwareSerwist} from "@/components/guards/tauri-aware-serwist";
+import {TauriTitleBar} from "@/components/customized/tauri-title-bar";
+import {TauriLinkInterceptor} from "@/components/guards/tauri-link-interceptor";
 
 import "@/css/jsxgraph.css";
+import "@/css/tauri-title-bar.css";
 
 export const metadata: Metadata = {
   title: "Skid Homework",
@@ -50,13 +53,12 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body suppressHydrationWarning>
-        <SerwistProvider
-          swUrl="/sw.js"
-          disable={process.env.NODE_ENV !== "production"}
-          options={{ updateViaCache: "none" }}
-        >
-          <Providers>{children}</Providers>
-        </SerwistProvider>
+        <TauriAwareSerwist>
+          <TauriLinkInterceptor>
+            <TauriTitleBar />
+            <Providers>{children}</Providers>
+          </TauriLinkInterceptor>
+        </TauriAwareSerwist>
       </body>
     </html>
   );
