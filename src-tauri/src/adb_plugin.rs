@@ -11,6 +11,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 use serde::{Deserialize, Serialize};
 use tauri::command;
 
@@ -18,6 +21,8 @@ static ADB_EXECUTABLE: OnceLock<PathBuf> = OnceLock::new();
 
 const CONNECT_READY_TIMEOUT: Duration = Duration::from_secs(3);
 const CONNECT_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -114,6 +119,14 @@ fn resolve_adb_executable() -> PathBuf {
     ADB_EXECUTABLE.get_or_init(discover_adb_executable).clone()
 }
 
+fn configure_adb_command(command: &mut Command) {
+    #[cfg(target_os = "windows")]
+    {
+        // Prevent adb.exe from flashing a console window for background desktop operations.
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+}
+
 fn normalize_text_output(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes)
         .replace("\r\n", "\n")
@@ -153,8 +166,10 @@ fn ensure_remote_address(value: &str, field_name: &str) -> Result<String, String
 
 fn run_adb_command(args: &[String]) -> Result<Output, String> {
     let executable = resolve_adb_executable();
+    let mut command = Command::new(&executable);
+    configure_adb_command(&mut command);
 
-    Command::new(&executable)
+    command
         .args(args)
         .output()
         .map_err(|error| match error.kind() {
