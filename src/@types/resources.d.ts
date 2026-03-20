@@ -661,12 +661,47 @@ interface Resources {
       "adb": {
         "capture-timeout": "ADB screenshot timed out. Please check the connection and try again.",
         "connect": "ADB Connect",
+        "connected": "Connected to {{serial}}.",
         "connecting": "Connecting...",
         "menu-aria-label": "ADB Menu",
+        "paired": "Pairing succeeded. Now connect using the device's connect address.",
+        "remote-dialog": {
+          "cancel": "Cancel",
+          "connect": {
+            "address": "Device address",
+            "description": "Use this if the device has already been paired with this computer.",
+            "placeholder": "192.168.1.23:5555",
+            "submit": "Connect"
+          },
+          "description": "Use the local ADB server, pick an existing device, or use Android Wireless debugging to pair and connect.",
+          "devices": {
+            "description": "Select a ready device that already exists in the local ADB server list.",
+            "empty": "No ADB devices were found. Connect a USB device or use the Pair / Connect tabs first.",
+            "loading": "Loading devices...",
+            "refresh": "Refresh",
+            "select": "Use Device",
+            "selected": "Selected",
+            "selected-badge": "Selected"
+          },
+          "pair": {
+            "description": "Enter the pairing address and code from Android Wireless debugging. After pairing, switch to the Connect tab.",
+            "pair-address": "Pairing address",
+            "pair-address-placeholder": "192.168.1.23:37123",
+            "pairing-code": "Pairing code",
+            "pairing-code-placeholder": "123456",
+            "submit": "Pair"
+          },
+          "tabs": {
+            "devices": "Devices",
+            "connect": "Connect",
+            "pair": "Pair"
+          },
+          "title": "Remote ADB Pair / Connect"
+        },
         "reconnect": "Reconnect ADB",
         "screenshot": "ADB Screenshot",
         "screenshot-busy": "Capturing...",
-        "screenshot-hint": "Capture a screenshot from a connected Android device via ADB (WebUSB)"
+        "screenshot-hint": "Capture a screenshot from a connected Android device via ADB"
       },
       "camera-help-aria": "Camera help",
       "camera-tip": {

@@ -16,9 +16,10 @@
     z-index: 9999;
 }
 
-/* Offset body content below the fixed title bar when it is present */
-body:has(.tauri-title-bar) {
-    padding-top: 32px;
+/* Offset the app scroll container below the fixed title bar in Tauri */
+body:has(.tauri-title-bar) .app-scroll-container {
+    height: calc(100% - 32px);
+    margin-top: 32px;
 }
 
 .tauri-title-bar__label {

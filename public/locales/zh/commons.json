@@ -258,10 +258,45 @@
       "reconnect": "重新连接 ADB",
       "screenshot": "ADB 截图",
       "connecting": "连接中...",
+      "connected": "已连接到 {{serial}}。",
+      "paired": "配对成功。请再使用设备的连接地址执行连接。",
       "screenshot-busy": "采集中...",
-      "screenshot-hint": "通过 ADB（WebUSB）从已连接的安卓设备捕获屏幕截图",
+      "screenshot-hint": "通过 ADB 从已连接的安卓设备捕获屏幕截图",
       "menu-aria-label": "ADB 操作菜单",
-      "capture-timeout": "ADB 截图超时，请检查连接"
+      "capture-timeout": "ADB 截图超时，请检查连接",
+      "remote-dialog": {
+        "title": "远程 ADB 配对 / 连接",
+        "description": "使用本地 ADB server，直接选择已有设备，或通过 Android 无线调试完成配对与连接。",
+        "cancel": "取消",
+        "tabs": {
+          "devices": "设备",
+          "connect": "连接",
+          "pair": "配对"
+        },
+        "devices": {
+          "description": "直接选择本机 ADB server 中已经就绪的设备。",
+          "refresh": "刷新",
+          "loading": "正在加载设备...",
+          "empty": "未发现 ADB 设备。请先连接 USB 设备，或使用下方的配对 / 连接功能。",
+          "select": "使用此设备",
+          "selected": "已选择",
+          "selected-badge": "当前设备"
+        },
+        "connect": {
+          "description": "如果这台电脑已经与设备完成过配对，请直接使用连接地址。",
+          "address": "设备地址",
+          "placeholder": "192.168.1.23:5555",
+          "submit": "连接"
+        },
+        "pair": {
+          "description": "填写 Android 无线调试中显示的配对地址和配对码。配对完成后，请切换到“连接”标签继续连接。",
+          "pair-address": "配对地址",
+          "pair-address-placeholder": "192.168.1.23:37123",
+          "pairing-code": "配对码",
+          "pairing-code-placeholder": "123456",
+          "submit": "配对"
+        }
+      }
     },
     "toasts": {
       "adb-failed": "ADB 处理发生异常：{{error}}",

@@ -1,36 +1,31 @@
-import { FileText, MoreVertical, Upload } from "lucide-react";
-import { Button } from "../ui/button";
-import { toast } from "sonner";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {FileText, MoreVertical, Upload} from "lucide-react";
+import {Button} from "../ui/button";
+import {toast} from "sonner";
+import {useCallback, useEffect, useRef, useState} from "react";
 import Image from "next/image";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "../ui/dialog";
-import { TextInputDialog } from "../dialogs/TextInputDialog";
-import { type FileItem, useProblemsStore } from "@/store/problems-store";
-import { Trans, useTranslation } from "react-i18next";
-import { useMediaQuery } from "@/hooks/use-media-query";
-import { cn } from "@/lib/utils";
-import { useShortcut } from "@/hooks/use-shortcut";
-import { ShortcutHint } from "../ShortcutHint";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "../ui/dropdown-menu";
+import {Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,} from "../ui/dialog";
+import {AdbRemoteConnectDialog} from "../dialogs/adb-remote-connect-dialog";
+import {TextInputDialog} from "../dialogs/TextInputDialog";
+import {type FileItem, useProblemsStore} from "@/store/problems-store";
+import {Trans, useTranslation} from "react-i18next";
+import {useMediaQuery} from "@/hooks/use-media-query";
+import {usePlatform} from "@/hooks/use-platform";
+import {cn} from "@/lib/utils";
+import {useShortcut} from "@/hooks/use-shortcut";
+import {ShortcutHint} from "../ShortcutHint";
+import {DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,} from "../ui/dropdown-menu";
 import {
   captureAdbScreenshot,
+  connectRemoteAdbDevice,
+  getSelectedDesktopAdbSerial,
   isAdbDeviceConnected,
+  pairRemoteAdbDevice,
   reconnectAdbDevice,
+  selectDesktopAdbDevice,
 } from "@/lib/webadb/screenshot";
-import { UnsupportedEnvironmentError } from "@/lib/webadb/manager";
-import { TimeoutError, withTimeout } from "@/utils/timeout";
-import { generateTextFilename } from "@/utils/file-utils";
+import {UnsupportedEnvironmentError} from "@/lib/webadb/manager";
+import {TimeoutError, withTimeout} from "@/utils/timeout";
+import {generateTextFilename} from "@/utils/file-utils";
 
 export type UploadAreaProps = {
   appendFiles: (files: File[] | FileList, source: FileItem["source"]) => void;
@@ -40,6 +35,8 @@ export type UploadAreaProps = {
 export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
   const { t } = useTranslation("commons", { keyPrefix: "upload-area" });
   const isCompact = useMediaQuery("(max-width: 640px)");
+  const platform = usePlatform();
+  const isTauriPlatform = platform === "tauri";
   const cameraTips = t("camera-tip.tips", {
     returnObjects: true,
   }) as string[];
@@ -52,6 +49,10 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
     null,
   );
   const [adbConnected, setAdbConnected] = useState(false);
+  const [adbRemoteDialogOpen, setAdbRemoteDialogOpen] = useState(false);
+  const [selectedAdbSerial, setSelectedAdbSerial] = useState<string | null>(
+    null,
+  );
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
@@ -72,17 +73,48 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
     uploadInputRef.current?.click();
   }, [isWorking, adbBusy]);
 
+  const handleAdbError = useCallback(
+    (error: unknown) => {
+      if (error instanceof UnsupportedEnvironmentError) {
+        toast.error(t("toasts.webusb-not-supported"));
+      } else {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        toast.error(t("toasts.adb-failed", { error: errorMessage }));
+      }
+    },
+    [t],
+  );
+
+  const refreshAdbStatus = useCallback(async (): Promise<boolean> => {
+    try {
+      const connected = await isAdbDeviceConnected();
+      setAdbConnected(connected);
+      if (isTauriPlatform) {
+        setSelectedAdbSerial(getSelectedDesktopAdbSerial() ?? null);
+      }
+      return connected;
+    } catch (error) {
+      console.error("ADB status check failed", error);
+      setAdbConnected(false);
+      if (isTauriPlatform) {
+        setSelectedAdbSerial(null);
+      }
+      return false;
+    }
+  }, [isTauriPlatform]);
 
   useEffect(() => {
     let cancelled = false;
 
     const updateAdbStatus = async () => {
-      try {
-        const connected = await isAdbDeviceConnected();
-        if (!cancelled) setAdbConnected(connected);
-      } catch (error) {
-        console.error("ADB status check failed", error);
-        if (!cancelled) setAdbConnected(false);
+      const connected = await refreshAdbStatus();
+      if (cancelled) {
+        return;
+      }
+
+      if (!connected && isTauriPlatform) {
+        setSelectedAdbSerial(null);
       }
     };
 
@@ -100,6 +132,14 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
 
     void updateAdbStatus();
 
+    const handleWindowFocus = () => {
+      void updateAdbStatus();
+    };
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("focus", handleWindowFocus);
+    }
+
     if (usb) {
       const handleUsbChange = () => {
         void updateAdbStatus();
@@ -110,6 +150,9 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
 
       return () => {
         cancelled = true;
+        if (typeof window !== "undefined") {
+          window.removeEventListener("focus", handleWindowFocus);
+        }
         usb.removeEventListener("connect", handleUsbChange);
         usb.removeEventListener("disconnect", handleUsbChange);
       };
@@ -117,58 +160,141 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
 
     return () => {
       cancelled = true;
+      if (typeof window !== "undefined") {
+        window.removeEventListener("focus", handleWindowFocus);
+      }
     };
-  }, []);
+  }, [isTauriPlatform, refreshAdbStatus]);
 
   const handleAdbReconnect = useCallback(async () => {
     if (isWorking || adbBusy) return;
+    if (isTauriPlatform) {
+      setAdbRemoteDialogOpen(true);
+      return;
+    }
     try {
       setAdbBusy(true);
       setAdbBusyMode("connect");
       const ok = await reconnectAdbDevice();
       setAdbConnected(ok);
     } catch (error) {
-      if (error instanceof UnsupportedEnvironmentError) {
-        toast.error(t("toasts.webusb-not-supported"));
-      } else {
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-        toast.error(t("toasts.adb-failed", { error: errorMessage }));
-      }
+      handleAdbError(error);
     } finally {
       setAdbBusy(false);
       setAdbBusyMode(null);
     }
-  }, [adbBusy, isWorking, t]);
+  }, [adbBusy, handleAdbError, isTauriPlatform, isWorking]);
 
   const handleAdbBtnClicked = useCallback(async () => {
     if (isWorking || adbBusy) return;
-    try {
-      setAdbBusy(true);
-      if (!adbConnected) {
+    const connected = await refreshAdbStatus();
+
+    if (!connected) {
+      if (isTauriPlatform) {
+        setAdbRemoteDialogOpen(true);
+        return;
+      }
+
+      try {
+        setAdbBusy(true);
         setAdbBusyMode("connect");
         const ok = await reconnectAdbDevice();
         setAdbConnected(ok);
-      } else {
-        setAdbBusyMode("capture");
-        const file = await withTimeout(captureAdbScreenshot(), 5_000);
-        appendFiles([file], "adb");
+      } catch (err) {
+        handleAdbError(err);
+      } finally {
+        setAdbBusy(false);
+        setAdbBusyMode(null);
       }
+
+      return;
+    }
+
+    try {
+      setAdbBusy(true);
+      setAdbBusyMode("capture");
+      const file = await withTimeout(captureAdbScreenshot(), 5_000);
+      appendFiles([file], "adb");
     } catch (err) {
-      if (err instanceof UnsupportedEnvironmentError) {
-        toast.error(t("toasts.webusb-not-supported"));
-      } else if (err instanceof TimeoutError) {
+      if (err instanceof TimeoutError) {
         toast.error(t("adb.capture-timeout"));
       } else {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        toast.error(t("toasts.adb-failed", { error: errorMessage }));
+        handleAdbError(err);
         // On failure we keep current adb-connected state as-is
       }
     } finally {
       setAdbBusy(false);
       setAdbBusyMode(null);
     }
-  }, [adbBusy, adbConnected, appendFiles, isWorking, t]);
+  }, [
+    adbBusy,
+    appendFiles,
+    handleAdbError,
+    isTauriPlatform,
+    isWorking,
+    refreshAdbStatus,
+    t,
+  ]);
+
+  const handleTauriRemoteConnect = useCallback(
+    async (address: string) => {
+      if (isWorking || adbBusy) return;
+      try {
+        setAdbBusy(true);
+        setAdbBusyMode("connect");
+        const serial = await connectRemoteAdbDevice(address);
+        setAdbConnected(true);
+        setSelectedAdbSerial(serial);
+        setAdbRemoteDialogOpen(false);
+        toast.success(t("adb.connected", { serial }));
+      } catch (error) {
+        handleAdbError(error);
+      } finally {
+        setAdbBusy(false);
+        setAdbBusyMode(null);
+      }
+    },
+    [adbBusy, handleAdbError, isWorking, t],
+  );
+
+  const handleTauriPairAndConnect = useCallback(
+    async (request: { pairingAddress: string; pairingCode: string }) => {
+      if (isWorking || adbBusy) return;
+      try {
+        setAdbBusy(true);
+        setAdbBusyMode("connect");
+        await pairRemoteAdbDevice(request);
+        toast.success(t("adb.paired"));
+      } catch (error) {
+        handleAdbError(error);
+      } finally {
+        setAdbBusy(false);
+        setAdbBusyMode(null);
+      }
+    },
+    [adbBusy, handleAdbError, isWorking, t],
+  );
+
+  const handleTauriDeviceSelect = useCallback(
+    async (serial: string) => {
+      if (isWorking || adbBusy) return;
+      try {
+        setAdbBusy(true);
+        setAdbBusyMode("connect");
+        const selectedSerial = await selectDesktopAdbDevice(serial);
+        setAdbConnected(true);
+        setSelectedAdbSerial(selectedSerial);
+        setAdbRemoteDialogOpen(false);
+        toast.success(t("adb.connected", { serial: selectedSerial }));
+      } catch (error) {
+        handleAdbError(error);
+      } finally {
+        setAdbBusy(false);
+        setAdbBusyMode(null);
+      }
+    },
+    [adbBusy, handleAdbError, isWorking, t],
+  );
 
   const uploadShortcut = useShortcut("upload", () => handleUploadBtnClicked(), [
     handleUploadBtnClicked,
@@ -330,6 +456,15 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
         </div>
       )}
       {/* Camera help dialog */}
+      <AdbRemoteConnectDialog
+        isOpen={adbRemoteDialogOpen}
+        isSubmitting={adbBusy && adbBusyMode === "connect"}
+        onOpenChange={setAdbRemoteDialogOpen}
+        onConnect={handleTauriRemoteConnect}
+        onPair={handleTauriPairAndConnect}
+        onSelectDevice={handleTauriDeviceSelect}
+        selectedSerial={selectedAdbSerial}
+      />
       <Dialog open={cameraTipOpen} onOpenChange={setCameraTipOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>

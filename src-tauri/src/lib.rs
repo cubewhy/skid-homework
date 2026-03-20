@@ -5,6 +5,8 @@ pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_opener::init())
     .invoke_handler(tauri::generate_handler![
+      adb_plugin::tauri_adb_list_devices,
+      adb_plugin::tauri_adb_pair,
       adb_plugin::tauri_adb_connect,
       adb_plugin::tauri_adb_screenshot,
       adb_plugin::tauri_adb_shell,

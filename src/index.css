@@ -5,6 +5,16 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+    height: 100%;
+}
+
+body {
+    min-height: 100dvh;
+    overflow: hidden;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -127,4 +137,10 @@
   .safe-area {
     padding-top: var(--safe-top);
   }
+
+    .app-scroll-container {
+        height: 100%;
+        overflow-x: hidden;
+        overflow-y: auto;
+    }
 }
