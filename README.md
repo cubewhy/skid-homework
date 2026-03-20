@@ -263,6 +263,28 @@ docker build -t skid-homework .
 pnpx i18next-cli types
 ```
 
+### Tauri 多平台发布
+
+仓库提供了 `Tauri Release` GitHub Actions 工作流，可手动触发并生成 Tauri 发布产物：
+
+- Android：APK / AAB
+- Linux：AppImage / `.deb` / `.rpm`
+- Windows：NSIS / MSI
+- macOS：Intel 与 Apple Silicon 分别构建
+
+该工作流会自动：
+
+- 基于现有 Git Tag 计算下一个语义化版本；
+- 生成适合本项目的 GitHub Release Markdown 页面；
+- 汇总各平台构建产物并上传到同一个 Release。
+
+如果需要为 Android Release 构建启用签名，请配置以下仓库 Secrets：
+
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
 ## License
 
 This work is licensed under GPL-3.0

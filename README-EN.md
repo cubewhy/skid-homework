@@ -112,6 +112,29 @@ services:
       - 3000:3000
 ```
 
+## Tauri Multi-Platform Releases
+
+The repository now includes a `Tauri Release` GitHub Actions workflow that can be triggered manually to build Tauri
+release artifacts for:
+
+- Android: APK / AAB
+- Linux: AppImage / `.deb` / `.rpm`
+- Windows: NSIS / MSI
+- macOS: separate Intel and Apple Silicon builds
+
+The workflow automatically:
+
+- calculates the next semantic version from existing Git tags;
+- generates a project-specific GitHub Release markdown page;
+- collects the platform artifacts and publishes them in a single GitHub Release.
+
+If you want signed Android release builds in CI, configure these repository secrets:
+
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
 ## License
 
 This work is licensed under GPL-3.0
