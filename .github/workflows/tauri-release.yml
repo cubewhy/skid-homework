@@ -44,7 +44,6 @@ jobs:
       version_name: ${{ steps.version.outputs.version_name }}
       release_title: ${{ steps.version.outputs.release_title }}
       prerelease: ${{ steps.release_config.outputs.prerelease }}
-      token_source: ${{ steps.git_auth.outputs.token_source }}
 
     steps:
       - name: Check out code
@@ -52,42 +51,6 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Prepare git auth
-        id: git_auth
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [ -n "${WORKFLOW_GIT_TOKEN:-}" ]; then
-            auth_token="$WORKFLOW_GIT_TOKEN"
-            token_source="WORKFLOW_GIT_TOKEN"
-          else
-            auth_token="$DEFAULT_GITHUB_TOKEN"
-            token_source="GITHUB_TOKEN"
-          fi
-
-          echo "::add-mask::$auth_token"
-          git remote set-url origin "https://x-access-token:${auth_token}@github.com/${GITHUB_REPOSITORY}.git"
-
-          {
-            echo "GH_TOKEN=$auth_token"
-            echo "TOKEN_SOURCE=$token_source"
-          } >> "$GITHUB_ENV"
-
-          echo "token_source=$token_source" >> "$GITHUB_OUTPUT"
-          echo "Token source: $token_source"
-
-      - name: Verify tag push token for workflow changes
-        if: steps.git_auth.outputs.token_source == 'GITHUB_TOKEN'
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | grep -q '^.github/workflows/'; then
-            echo "::error title=Missing WORKFLOW_GIT_TOKEN::Current commit updates .github/workflows/. GitHub's default GITHUB_TOKEN cannot push tags for workflow changes. Add repository secret WORKFLOW_GIT_TOKEN (classic PAT: repo + workflow; fine-grained PAT: Contents read/write + Workflows read/write)."
-            exit 1
-          fi
 
       - name: Resolve release configuration
         id: release_config
@@ -169,22 +132,42 @@ jobs:
         shell: bash
         env:
           NEW_TAG: ${{ steps.version.outputs.new_tag }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+
+          push_with_token() {
+            local token="$1"
+            local token_source="$2"
+            local push_log="$RUNNER_TEMP/git-push-${NEW_TAG}-${token_source}.log"
+
+            echo "::add-mask::$token"
+            if git push "https://x-access-token:${token}@github.com/${GITHUB_REPOSITORY}.git" "$NEW_TAG" 2>&1 | tee "$push_log"; then
+              echo "Pushed tag with ${token_source}"
+              return 0
+            fi
+
+            if grep -Fq "403" "$push_log" || grep -Fq "Permission to" "$push_log"; then
+              echo "Tag push with ${token_source} was rejected by GitHub."
+            fi
+
+            return 1
+          }
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag "$NEW_TAG" "$GITHUB_SHA"
 
-          push_log="$RUNNER_TEMP/git-push-${NEW_TAG}.log"
-          if git push origin "$NEW_TAG" 2>&1 | tee "$push_log"; then
+          if push_with_token "$GITHUB_TOKEN" "GITHUB_TOKEN"; then
+            exit 0
+          fi
+
+          if [ -n "${WORKFLOW_GIT_TOKEN:-}" ] && push_with_token "$WORKFLOW_GIT_TOKEN" "WORKFLOW_GIT_TOKEN"; then
             exit 0
           fi
 
           git tag -d "$NEW_TAG" >/dev/null 2>&1 || true
-          if grep -Fq 'without `workflows` permission' "$push_log"; then
-            echo "::error title=Missing WORKFLOW_GIT_TOKEN::Failed to push tag $NEW_TAG because the current token does not have workflows permission. Configure repository secret WORKFLOW_GIT_TOKEN (classic PAT: repo + workflow; fine-grained PAT: Contents read/write + Workflows read/write)."
-          fi
+          echo "::error title=Tag push failed::Failed to push tag $NEW_TAG with both GITHUB_TOKEN and WORKFLOW_GIT_TOKEN. Ensure the workflow has contents:write and any configured PAT can write to ${GITHUB_REPOSITORY}."
           exit 1
 
   build-desktop:
@@ -442,14 +425,12 @@ jobs:
 
       - name: Prepare git auth
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
-          if [ -n "${WORKFLOW_GIT_TOKEN:-}" ]; then
-            auth_token="$WORKFLOW_GIT_TOKEN"
-          else
-            auth_token="$DEFAULT_GITHUB_TOKEN"
-          fi
+          auth_token="${GITHUB_TOKEN}"
 
           echo "::add-mask::$auth_token"
           git remote set-url origin "https://x-access-token:${auth_token}@github.com/${GITHUB_REPOSITORY}.git"
