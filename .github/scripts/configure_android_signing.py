@@ -54,21 +54,12 @@ def ensure_release_build_type(build_gradle: str) -> str:
     if RELEASE_SIGNING_LINE in build_gradle:
         return build_gradle
 
-    index = -1
     for release_marker in RELEASE_MARKERS:
-        index = build_gradle.find(release_marker)
-        if index != -1:
-            break
+        if release_marker in build_gradle:
+            replacement = f'{release_marker}\n{RELEASE_SIGNING_LINE}'
+            return build_gradle.replace(release_marker, replacement, 1)
 
-    if index == -1:
-        raise SystemExit("Unable to find release buildType block in Android build.gradle.kts")
-
-    line_end = build_gradle.find("\n", index)
-    if line_end == -1:
-        raise SystemExit("Malformed Android build.gradle.kts release block")
-
-    insertion = f"\n{RELEASE_SIGNING_LINE}"
-    return build_gradle[: line_end + 1] + insertion + build_gradle[line_end + 1 :]
+    raise SystemExit("Unable to find release buildType block in Android build.gradle.kts")
 
 
 def main() -> None:
