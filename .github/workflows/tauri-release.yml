@@ -187,11 +187,11 @@ jobs:
             rust_targets: x86_64-unknown-linux-gnu
             build_args: ""
           - platform_id: macos-x64
-            runner: macos-13
+            runner: macos-15-intel
             rust_targets: x86_64-apple-darwin
             build_args: "--target x86_64-apple-darwin"
           - platform_id: macos-aarch64
-            runner: macos-14
+            runner: macos-15
             rust_targets: aarch64-apple-darwin
             build_args: "--target aarch64-apple-darwin"
 
