@@ -28,7 +28,7 @@ env:
   NODE_VERSION: 24
   ANDROID_API_LEVEL: "36"
   ANDROID_BUILD_TOOLS: "36.0.0"
-  ANDROID_NDK_VERSION: "27.0.12077973"
+  ANDROID_NDK_VERSION: "29.0.14206865"
 
 concurrency:
   group: tauri-release-${{ github.ref }}
@@ -296,8 +296,16 @@ jobs:
         run: |
           set -euo pipefail
           sdkmanager "platforms;android-${ANDROID_API_LEVEL}" "build-tools;${ANDROID_BUILD_TOOLS}" "ndk;${ANDROID_NDK_VERSION}"
-          echo "NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
+          selected_ndk="$(find "${ANDROID_HOME}/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          if [ -z "${selected_ndk:-}" ] || [ ! -d "$selected_ndk" ]; then
+            echo "Unable to resolve an installed Android NDK under ${ANDROID_HOME}/ndk" >&2
+            exit 1
+          fi
+
+          echo "Using Android NDK: ${selected_ndk}"
+          echo "NDK_HOME=${selected_ndk}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=${selected_ndk}" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
