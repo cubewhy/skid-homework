@@ -1,4 +1,5 @@
 mod adb_plugin;
+mod stream_decoder;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -10,6 +11,14 @@ pub fn run() {
       adb_plugin::tauri_adb_connect,
       adb_plugin::tauri_adb_screenshot,
       adb_plugin::tauri_adb_shell,
+      adb_plugin::tauri_adb_push,
+      adb_plugin::tauri_adb_forward,
+      adb_plugin::tauri_adb_remove_forward,
+      adb_plugin::tauri_adb_start_server,
+      adb_plugin::tauri_adb_stop_server,
+      stream_decoder::tauri_scanner_start_stream,
+      stream_decoder::tauri_scanner_stop_stream,
+      stream_decoder::tauri_scanner_get_frame,
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {

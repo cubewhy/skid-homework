@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          package="com.skidhomework.server">
+
+    <!-- Requires camera permission for Camera2 API -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+
+    <!-- No application/activity needed since this runs headlessly via app_process -->
+    <application
+            android:allowBackup="false"
+            android:label="Camera Server">
+    </application>
+
+</manifest>

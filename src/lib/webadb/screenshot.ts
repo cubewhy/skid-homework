@@ -15,6 +15,15 @@ export interface RemoteAdbPairRequest {
   pairingCode: string;
 }
 
+export interface AdbScreenshotCapture {
+  file: File;
+  width: number | null;
+  height: number | null;
+  capturedAt: number;
+  source: "tauri" | "webusb";
+  serial?: string;
+}
+
 let _manager: AdbManager | undefined;
 let selectedDevice: AdbDaemonWebUsbDevice | undefined;
 let selectedTauriSerial: string | undefined;
@@ -22,6 +31,43 @@ let selectedTauriSerial: string | undefined;
 const buildScreenshotFile = (parts: BlobPart[]): File => {
   const fileName = `screenshot_${new Date().toISOString().replace(/[:.]/g, "-")}.png`;
   return new File(parts, fileName, { type: "image/png" });
+};
+
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+const PNG_IHDR_LENGTH = 13;
+const PNG_IHDR_TYPE = [0x49, 0x48, 0x44, 0x52];
+
+const readPngDimensions = (
+  bytes: Uint8Array,
+): { width: number; height: number } | null => {
+  const minimumLength = 8 + 4 + 4 + PNG_IHDR_LENGTH;
+  if (bytes.byteLength < minimumLength) {
+    return null;
+  }
+
+  for (let index = 0; index < PNG_SIGNATURE.length; index += 1) {
+    if (bytes[index] !== PNG_SIGNATURE[index]) {
+      return null;
+    }
+  }
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const ihdrLength = view.getUint32(8, false);
+
+  if (ihdrLength !== PNG_IHDR_LENGTH) {
+    return null;
+  }
+
+  for (let index = 0; index < PNG_IHDR_TYPE.length; index += 1) {
+    if (bytes[12 + index] !== PNG_IHDR_TYPE[index]) {
+      return null;
+    }
+  }
+
+  return {
+    width: view.getUint32(16, false),
+    height: view.getUint32(20, false),
+  };
 };
 
 async function syncSelectedWebUsbDevice(): Promise<boolean> {
@@ -195,16 +241,55 @@ export async function pairRemoteAdbDevice(
 }
 
 export async function captureAdbScreenshot(): Promise<File> {
-  if (isTauri()) {
-    const hasConnectedDevice = await syncSelectedTauriSerial();
-    if (!hasConnectedDevice || !selectedTauriSerial) {
-      throw new Error("Tauri ADB: No ADB device connected");
+  const capture = await captureAdbScreenshotWithMetadata();
+  return capture.file;
+}
+
+const resolveActiveTauriSerial = async (
+  preferredSerial?: string,
+): Promise<string> => {
+  if (preferredSerial) {
+    const devices = (await listDesktopAdbDevices()).filter(
+      (device) => device.state === "device",
+    );
+    const hasPreferredDevice = devices.some(
+      (device) => device.serial === preferredSerial,
+    );
+    if (!hasPreferredDevice) {
+      throw new Error(`Tauri ADB: Device ${preferredSerial} is not connected`);
     }
 
-    const screenshotBytes = await captureTauriAdbScreenshot(selectedTauriSerial);
+    selectedTauriSerial = preferredSerial;
+    return preferredSerial;
+  }
+
+  const hasConnectedDevice = await syncSelectedTauriSerial();
+  if (!hasConnectedDevice || !selectedTauriSerial) {
+    throw new Error("Tauri ADB: No ADB device connected");
+  }
+
+  return selectedTauriSerial;
+};
+
+export async function captureAdbScreenshotWithMetadata(options?: {
+  preferredDesktopSerial?: string;
+}): Promise<AdbScreenshotCapture> {
+  const capturedAt = Date.now();
+
+  if (isTauri()) {
+    const serial = await resolveActiveTauriSerial(options?.preferredDesktopSerial);
+    const screenshotBytes = await captureTauriAdbScreenshot(serial);
     const blobCompatibleBytes = new Uint8Array(screenshotBytes.byteLength);
     blobCompatibleBytes.set(screenshotBytes);
-    return buildScreenshotFile([blobCompatibleBytes]);
+    const dimensions = readPngDimensions(blobCompatibleBytes);
+    return {
+      file: buildScreenshotFile([blobCompatibleBytes]),
+      width: dimensions?.width ?? null,
+      height: dimensions?.height ?? null,
+      capturedAt,
+      source: "tauri",
+      serial,
+    };
   }
 
   const adb = await getWebUsbAdbConnection();
@@ -225,5 +310,20 @@ export async function captureAdbScreenshot(): Promise<File> {
     await adb.close();
   }
 
-  return buildScreenshotFile(chunks as BlobPart[]);
+  const totalBytes = chunks.reduce((size, chunk) => size + chunk.byteLength, 0);
+  const merged = new Uint8Array(totalBytes);
+  let cursor = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, cursor);
+    cursor += chunk.byteLength;
+  }
+  const dimensions = readPngDimensions(merged);
+
+  return {
+    file: buildScreenshotFile([merged]),
+    width: dimensions?.width ?? null,
+    height: dimensions?.height ?? null,
+    capturedAt,
+    source: "webusb",
+  };
 }

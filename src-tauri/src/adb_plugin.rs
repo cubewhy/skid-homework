@@ -21,6 +21,8 @@ static ADB_EXECUTABLE: OnceLock<PathBuf> = OnceLock::new();
 
 const CONNECT_READY_TIMEOUT: Duration = Duration::from_secs(3);
 const CONNECT_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const SCANNER_SERVER_PID_PATH: &str = "/data/local/tmp/skid-scanner-server.pid";
+const SCANNER_SERVER_LOG_PATH: &str = "/data/local/tmp/skid-scanner-server.log";
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -162,6 +164,60 @@ fn ensure_remote_address(value: &str, field_name: &str) -> Result<String, String
     }
 
     Ok(address)
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn build_scanner_server_start_script(
+    classpath: &str,
+    main_class: &str,
+    server_args: &[String],
+) -> String {
+    let mut command_parts = vec![
+        format!("CLASSPATH={}", shell_single_quote(classpath)),
+        "app_process".to_string(),
+        "/".to_string(),
+        shell_single_quote(main_class),
+    ];
+    command_parts.extend(server_args.iter().map(|value| shell_single_quote(value)));
+
+    format!(
+        "mkdir -p /data/local/tmp; \
+rm -f {pidfile}; \
+: >{logfile}; \
+{} </dev/null >>{logfile} 2>&1 & echo $! > {pidfile}",
+        command_parts.join(" "),
+        pidfile = shell_single_quote(SCANNER_SERVER_PID_PATH),
+        logfile = shell_single_quote(SCANNER_SERVER_LOG_PATH),
+    )
+}
+
+fn build_scanner_server_stop_script(main_class: &str) -> String {
+    format!(
+        "pidfile={pidfile}; \
+stopped=0; \
+if [ -f \"$pidfile\" ]; then \
+  pid=$(cat \"$pidfile\"); \
+  if [ -n \"$pid\" ]; then \
+    kill \"$pid\" >/dev/null 2>&1 && stopped=1; \
+  fi; \
+  rm -f \"$pidfile\"; \
+fi; \
+if command -v pkill >/dev/null 2>&1; then \
+  pkill -f {main_class} >/dev/null 2>&1 && stopped=1; \
+fi; \
+if [ \"$stopped\" -eq 1 ]; then \
+  echo \"Camera server stopped.\"; \
+fi",
+        pidfile = shell_single_quote(SCANNER_SERVER_PID_PATH),
+        main_class = shell_single_quote(main_class),
+    )
+}
+
+fn wrap_shell_c_script(script: &str) -> String {
+    shell_single_quote(script)
 }
 
 fn run_adb_command(args: &[String]) -> Result<Output, String> {
@@ -415,4 +471,185 @@ pub async fn tauri_adb_shell(serial: String, command: String) -> Result<String, 
     })
     .await
     .map_err(|error| format!("ADB shell task failed: {error}"))?
+}
+
+/// Push a local file to the device filesystem.
+#[command]
+pub async fn tauri_adb_push(
+    serial: String,
+    local_path: String,
+    remote_path: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let serial = ensure_non_empty(&serial, "ADB serial")?;
+        let local_path = ensure_non_empty(&local_path, "Local file path")?;
+        let remote_path = ensure_non_empty(&remote_path, "Remote file path")?;
+
+        let args = vec![
+            "-s".to_string(),
+            serial.clone(),
+            "push".to_string(),
+            local_path,
+            remote_path.clone(),
+        ];
+        let output = run_adb_checked(&args, &format!("adb -s {serial} push -> {remote_path}"))?;
+
+        Ok(combine_command_output(&output))
+    })
+    .await
+    .map_err(|error| format!("ADB push task failed: {error}"))?
+}
+
+/// Set up TCP port forwarding to a device-side abstract socket.
+#[command]
+pub async fn tauri_adb_forward(
+    serial: String,
+    local_port: u16,
+    remote_socket_name: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let serial = ensure_non_empty(&serial, "ADB serial")?;
+        let remote_socket_name = ensure_non_empty(&remote_socket_name, "Remote socket name")?;
+
+        let args = vec![
+            "-s".to_string(),
+            serial.clone(),
+            "forward".to_string(),
+            format!("tcp:{local_port}"),
+            format!("localabstract:{remote_socket_name}"),
+        ];
+        let output = run_adb_checked(
+            &args,
+            &format!("adb -s {serial} forward tcp:{local_port} localabstract:{remote_socket_name}"),
+        )?;
+
+        Ok(combine_command_output(&output))
+    })
+    .await
+    .map_err(|error| format!("ADB forward task failed: {error}"))?
+}
+
+/// Remove a previously established TCP port forward.
+#[command]
+pub async fn tauri_adb_remove_forward(serial: String, local_port: u16) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let serial = ensure_non_empty(&serial, "ADB serial")?;
+
+        let args = vec![
+            "-s".to_string(),
+            serial.clone(),
+            "forward".to_string(),
+            "--remove".to_string(),
+            format!("tcp:{local_port}"),
+        ];
+        let output = run_adb_checked(
+            &args,
+            &format!("adb -s {serial} forward --remove tcp:{local_port}"),
+        )?;
+
+        Ok(combine_command_output(&output))
+    })
+    .await
+    .map_err(|error| format!("ADB remove-forward task failed: {error}"))?
+}
+
+/// Launch the Android Camera Server via `app_process` in the background.
+/// Returns after the device-side shell has detached the background process.
+#[command]
+pub async fn tauri_adb_start_server(
+    serial: String,
+    classpath: String,
+    main_class: String,
+    server_args: Vec<String>,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let serial = ensure_non_empty(&serial, "ADB serial")?;
+        let classpath = ensure_non_empty(&classpath, "Server classpath")?;
+        let main_class = ensure_non_empty(&main_class, "Server main class")?;
+        let shell_command =
+            build_scanner_server_start_script(&classpath, &main_class, &server_args);
+        let args = vec![
+            "-s".to_string(),
+            serial.clone(),
+            "shell".to_string(),
+            "sh".to_string(),
+            "-c".to_string(),
+            wrap_shell_c_script(&shell_command),
+        ];
+        let output = run_adb_checked(
+            &args,
+            &format!("adb -s {serial} shell sh -c <start scanner server>"),
+        )?;
+        let message = combine_command_output(&output);
+
+        if message.is_empty() {
+            Ok(format!("Camera server started on {serial}."))
+        } else {
+            Ok(message)
+        }
+    })
+    .await
+    .map_err(|error| format!("ADB start-server task failed: {error}"))?
+}
+
+/// Stop the Android Camera Server running on the device.
+/// Stops the tracked background process without killing unrelated `app_process` tasks.
+#[command]
+pub async fn tauri_adb_stop_server(serial: String, classpath: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let serial = ensure_non_empty(&serial, "ADB serial")?;
+        let _classpath = ensure_non_empty(&classpath, "Server classpath")?;
+        let kill_command = build_scanner_server_stop_script("com.skidhomework.server.Server");
+        let args = vec![
+            "-s".to_string(),
+            serial.clone(),
+            "shell".to_string(),
+            "sh".to_string(),
+            "-c".to_string(),
+            wrap_shell_c_script(&kill_command),
+        ];
+
+        let output = run_adb_command(&args)?;
+        let message = combine_command_output(&output);
+
+        if message.is_empty() {
+            Ok(format!("Camera server stopped on {serial}."))
+        } else {
+            Ok(message)
+        }
+    })
+    .await
+    .map_err(|error| format!("ADB stop-server task failed: {error}"))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn start_script_uses_explicit_paths_without_shell_variables() {
+        let script = build_scanner_server_start_script(
+            "/data/local/tmp/camera-server.jar",
+            "com.skidhomework.server.Server",
+            &[
+                "--socket".to_string(),
+                "scanner".to_string(),
+                "--width".to_string(),
+                "640".to_string(),
+            ],
+        );
+
+        assert!(script.contains("mkdir -p /data/local/tmp;"));
+        assert!(script.contains("/data/local/tmp/skid-scanner-server.log"));
+        assert!(script.contains("/data/local/tmp/skid-scanner-server.pid"));
+        assert!(script.contains("app_process / 'com.skidhomework.server.Server'"));
+        assert!(!script.contains("pidfile="));
+        assert!(!script.contains("logfile="));
+    }
+
+    #[test]
+    fn shell_c_wrapper_quotes_entire_script() {
+        let wrapped = wrap_shell_c_script("echo hi; echo bye");
+        assert_eq!(wrapped, "'echo hi; echo bye'");
+    }
 }

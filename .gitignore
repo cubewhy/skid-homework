@@ -51,6 +51,19 @@ public/sw.js.map
 # build output
 out
 src-tauri/target
+/src-tauri/target-scanner-real-benchmark/
+/artifacts/scanner-benchmarks/
+/server/.gradle/
+/server/build/
+/server/build_custom/
+/server/build_selector_test/
+/server/build_syntax/
+
+#tests
+tests
+
+#scripts
+scripts
 
 # local AI Agent Settings
 .claude

@@ -7,6 +7,7 @@ license = ""
 repository = ""
 edition = "2021"
 rust-version = "1.77.2"
+default-run = "skid-homework"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -24,3 +25,13 @@ log = "0.4"
 tauri = { version = "2.10.3", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
+# H.264 stream decoding and transport
+openh264 = "0.9"
+base64 = "0.22"
+tokio = { version = "1", features = ["net", "io-util", "sync", "macros", "rt"] }
+
+# Optimize all dependencies even in dev builds.
+# Without this, CPU-heavy crates like openh264 run ~50x slower
+# (e.g. H.264 decode: 600 ms debug vs ~10 ms optimized).
+[profile.dev.package."*"]
+opt-level = 2

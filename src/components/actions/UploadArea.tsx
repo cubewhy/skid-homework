@@ -1,4 +1,5 @@
-import {FileText, MoreVertical, Upload} from "lucide-react";
+import {Camera, FileText, MoreVertical, Upload} from "lucide-react";
+import ScannerView from "../scanner/ScannerView";
 import {Button} from "../ui/button";
 import {toast} from "sonner";
 import {useCallback, useEffect, useRef, useState} from "react";
@@ -50,6 +51,7 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
   );
   const [adbConnected, setAdbConnected] = useState(false);
   const [adbRemoteDialogOpen, setAdbRemoteDialogOpen] = useState(false);
+  const [scannerDialogOpen, setScannerDialogOpen] = useState(false);
   const [selectedAdbSerial, setSelectedAdbSerial] = useState<string | null>(
     null,
   );
@@ -447,6 +449,10 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-40">
+                <DropdownMenuItem onClick={() => setScannerDialogOpen(true)}>
+                  <Camera className="mr-2 h-4 w-4" />
+                  {t("adb.document-scanner")}
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleAdbReconnect}>
                   {t("adb.reconnect")}
                 </DropdownMenuItem>
@@ -493,6 +499,11 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ScannerView
+        isOpen={scannerDialogOpen}
+        onOpenChange={setScannerDialogOpen}
+        onDocumentsCaptured={(files) => appendFiles(files, "adb")}
+      />
     </>
   );
 }

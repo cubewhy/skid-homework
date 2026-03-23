@@ -1,0 +1,418 @@
+package com.skidhomework.server;
+
+import android.net.LocalServerSocket;
+import android.net.LocalSocket;
+import android.os.SystemClock;
+
+import java.io.IOException;
+import java.io.OutputStream;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+
+/**
+ * Minimal Android Camera Server for ADB-based document scanning.
+ *
+ * <p>Launched via {@code adb shell CLASSPATH=/data/local/tmp/camera-server.jar
+ * app_process / com.skidhomework.server.Server [options]}.
+ *
+ * <p>Opens a camera using the Camera2 API, encodes frames to H.264 via MediaCodec,
+ * and streams the encoded NAL units over a LocalSocket for the host to read.
+ *
+ * <p>Protocol: each NAL unit is prefixed with a 4-byte big-endian length header.
+ */
+public final class Server {
+
+    private static final String DEFAULT_SOCKET_NAME = "scanner";
+    private static final int DEFAULT_WIDTH = 640;
+    private static final int DEFAULT_HEIGHT = 360;
+    private static final int DEFAULT_BITRATE = 2_000_000; // 2 Mbps
+    private static final int DEFAULT_FRAMERATE = 60;
+    private static final String DEFAULT_CAMERA_ID = "0"; // Back camera
+    private static final int MAX_CONSECUTIVE_PIPELINE_RECOVERIES = 8;
+    private static final int MAX_CONSECUTIVE_CAMERA_RECOVERIES = Integer.MAX_VALUE;
+    private static final long STABLE_SESSION_RESET_MS = 5_000L;
+    private static final long CAMERA_RECOVERY_RESET_MS = 2_500L;
+    private static final long RECOVERY_DELAY_BASE_MS = 250L;
+    private static final long RECOVERY_DELAY_MAX_MS = 2_000L;
+    private static final long CAMERA_RECOVERY_DELAY_BASE_MS = 150L;
+    private static final long CAMERA_RECOVERY_DELAY_MAX_MS = 1_000L;
+    private static final long STARTUP_FIRST_FRAME_TIMEOUT_MS = 1_800L;
+
+    public static void main(String[] args) {
+        android.os.Looper.prepareMainLooper();
+        ServerConfig config = parseArgs(args);
+
+        System.out.println("[Server] Starting camera server...");
+        System.out.println("[Server] Socket: " + config.socketName);
+        System.out.println("[Server] Resolution: " + config.width + "x" + config.height);
+        System.out.println("[Server] Bitrate: " + config.bitrate + ", FPS: " + config.framerate);
+        System.out.println("[Server] Camera: " + config.cameraId);
+
+        AtomicReference<LocalServerSocket> serverSocketRef = new AtomicReference<>();
+        AtomicReference<LocalSocket> clientSocketRef = new AtomicReference<>();
+        AtomicReference<SocketRelay> relayRef = new AtomicReference<>();
+        SocketConnectionMonitor socketMonitor = null;
+        SocketRelay relay = null;
+        AtomicBoolean shutdownRequested = new AtomicBoolean(false);
+        AtomicReference<StopSignal> activeStopSignal = new AtomicReference<>();
+        AtomicReference<StopReason> terminalStopReason = new AtomicReference<>();
+        AtomicReference<String> finalStopReason = new AtomicReference<>("unknown");
+
+        Consumer<StopReason> requestTerminalStop = (reason) -> {
+            StopReason safeReason = reason == null ? StopReason.fatal("terminal stop requested with a null reason") : reason;
+            if (terminalStopReason.compareAndSet(null, safeReason)) {
+                finalStopReason.set(safeReason.toString());
+                System.out.println("[Server] Terminal stop requested: " + safeReason);
+            }
+
+            if (safeReason.isSocketTerminal() || "process_shutdown".equals(safeReason.getCode())) {
+                SocketRelay activeRelay = relayRef.getAndSet(null);
+                if (activeRelay != null) {
+                    activeRelay.close();
+                }
+                closeQuietly(clientSocketRef.getAndSet(null));
+                closeQuietly(serverSocketRef.getAndSet(null));
+            }
+
+            StopSignal stopSignal = activeStopSignal.get();
+            if (stopSignal != null) {
+                stopSignal.request(safeReason);
+            }
+        };
+
+        try {
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                shutdownRequested.set(true);
+                requestTerminalStop.accept(StopReason.processShutdown());
+                closeQuietly(clientSocketRef.getAndSet(null));
+                closeQuietly(serverSocketRef.getAndSet(null));
+            }, "ServerShutdownHook"));
+
+            // Create a LocalServerSocket to accept the host connection
+            LocalServerSocket serverSocket = new LocalServerSocket(config.socketName);
+            serverSocketRef.set(serverSocket);
+            System.out.println("[Server] Waiting for client connection...");
+
+            LocalSocket clientSocket = serverSocket.accept();
+            clientSocketRef.set(clientSocket);
+            clientSocket.setSendBufferSize(1024 * 1024);
+            System.out.println("[Server] Client connected.");
+            closeQuietly(serverSocket);
+            serverSocketRef.set(null);
+
+            OutputStream outputStream = clientSocket.getOutputStream();
+
+            // Create the socket relay that writes length-prefixed NAL units
+            relay = new SocketRelay(outputStream, requestTerminalStop);
+            relayRef.set(relay);
+            socketMonitor = new SocketConnectionMonitor(clientSocket, requestTerminalStop);
+            socketMonitor.start();
+
+            StopReason lastReason = runStreamingLoop(
+                    config,
+                    relay,
+                    shutdownRequested,
+                    activeStopSignal,
+                    terminalStopReason
+            );
+            finalStopReason.set(lastReason.toString());
+            logFinalStopReason(lastReason);
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            requestTerminalStop.accept(StopReason.processShutdown());
+        } catch (Exception e) {
+            requestTerminalStop.accept(StopReason.fatal("fatal error: " + e.getMessage()));
+            System.err.println("[Server] Fatal error: " + e.getMessage());
+            e.printStackTrace();
+        } finally {
+            if (socketMonitor != null) {
+                socketMonitor.close();
+            }
+            SocketRelay activeRelay = relayRef.getAndSet(null);
+            if (activeRelay != null) {
+                activeRelay.close();
+            } else if (relay != null) {
+                relay.close();
+            }
+            closeQuietly(clientSocketRef.getAndSet(null));
+            closeQuietly(serverSocketRef.getAndSet(null));
+
+            System.out.println("[Server] Camera server stopped. Reason: " + finalStopReason.get());
+        }
+    }
+
+    private static StopReason runStreamingLoop(
+            ServerConfig config,
+            SocketRelay relay,
+            AtomicBoolean shutdownRequested,
+            AtomicReference<StopSignal> activeStopSignal,
+            AtomicReference<StopReason> terminalStopReason
+    ) throws InterruptedException {
+        int consecutiveRecoveries = 0;
+        StopReason lastReason = StopReason.fatal("streaming loop exited without a reason");
+
+        while (!shutdownRequested.get()) {
+            StopReason forcedStop = terminalStopReason.get();
+            if (forcedStop != null) {
+                return forcedStop;
+            }
+
+            StopSignal sessionStopSignal = new StopSignal();
+            activeStopSignal.set(sessionStopSignal);
+
+            VideoEncoder encoder = null;
+            CameraCapture capture = null;
+            long sessionStartMs = SystemClock.elapsedRealtime();
+
+            try {
+                Consumer<StopReason> requestSessionStop = sessionStopSignal::request;
+
+                encoder = new VideoEncoder(
+                        config.width,
+                        config.height,
+                        config.bitrate,
+                        config.framerate,
+                        relay,
+                        requestSessionStop
+                );
+                capture = new CameraCapture(
+                        config.cameraId,
+                        config.width,
+                        config.height,
+                        config.framerate,
+                        encoder.getInputSurface(),
+                        requestSessionStop
+                );
+
+                encoder.start();
+                capture.start();
+                System.out.println("[Server] Waiting for first encoded frame...");
+                encoder.awaitFirstFrame(STARTUP_FIRST_FRAME_TIMEOUT_MS);
+
+                System.out.println("[Server] Streaming started. Waiting for disconnect or shutdown...");
+                sessionStopSignal.await();
+            } catch (Exception e) {
+                StopReason startupFailure = classifyStartupFailure(e);
+                sessionStopSignal.request(startupFailure);
+                System.err.println("[Server] Session startup failed: " + startupFailure.getMessage());
+                e.printStackTrace();
+            } finally {
+                activeStopSignal.compareAndSet(sessionStopSignal, null);
+                if (capture != null) {
+                    capture.stop();
+                }
+                if (encoder != null) {
+                    encoder.stop();
+                }
+            }
+
+            lastReason = terminalStopReason.get();
+            if (lastReason != null) {
+                return lastReason;
+            }
+
+            lastReason = sessionStopSignal.getReason();
+            final long sessionDurationMs = SystemClock.elapsedRealtime() - sessionStartMs;
+            if (!lastReason.isRecoverable()) {
+                return lastReason;
+            }
+
+            if (shouldResetRecoveryCounter(lastReason, sessionDurationMs)) {
+                consecutiveRecoveries = 0;
+            }
+            consecutiveRecoveries++;
+            logSessionStop(lastReason, sessionDurationMs, consecutiveRecoveries);
+
+            if (hasExceededRecoveryLimit(lastReason, consecutiveRecoveries)) {
+                return StopReason.fatal(
+                        "recovery limit exceeded after "
+                                + getRecoveryLimit(lastReason)
+                                + " attempts; last reason: "
+                                + lastReason.getMessage()
+                );
+            }
+
+            long delayMs = computeRecoveryDelayMs(lastReason, consecutiveRecoveries);
+            System.out.println(
+                    "[Server] Recovering "
+                            + describeRecoveryTarget(lastReason)
+                            + " attempt #"
+                            + consecutiveRecoveries
+                            + " in "
+                            + delayMs
+                            + "ms after "
+                            + lastReason
+                            + "."
+            );
+            Thread.sleep(delayMs);
+        }
+
+        return StopReason.processShutdown();
+    }
+
+    private static StopReason classifyStartupFailure(Exception exception) {
+        Throwable cause = exception.getCause() != null ? exception.getCause() : exception;
+        String message = cause.getMessage() != null ? cause.getMessage() : exception.toString();
+
+        if (exception instanceof IOException || cause instanceof IOException) {
+            return StopReason.encoderFailed("encoder startup failed: " + message);
+        }
+
+        return StopReason.cameraStartFailed("camera pipeline startup failed: " + message);
+    }
+
+    private static boolean shouldResetRecoveryCounter(
+            StopReason reason,
+            long sessionDurationMs
+    ) {
+        if (reason.isCameraRecoveryCandidate()) {
+            return sessionDurationMs >= CAMERA_RECOVERY_RESET_MS;
+        }
+        return sessionDurationMs >= STABLE_SESSION_RESET_MS;
+    }
+
+    private static boolean hasExceededRecoveryLimit(
+            StopReason reason,
+            int consecutiveRecoveries
+    ) {
+        return consecutiveRecoveries > getRecoveryLimit(reason);
+    }
+
+    private static int getRecoveryLimit(StopReason reason) {
+        if (reason.isCameraRecoveryCandidate()) {
+            return MAX_CONSECUTIVE_CAMERA_RECOVERIES;
+        }
+        return MAX_CONSECUTIVE_PIPELINE_RECOVERIES;
+    }
+
+    private static long computeRecoveryDelayMs(StopReason reason, int consecutiveRecoveries) {
+        long delayMs = reason.isCameraRecoveryCandidate()
+                ? CAMERA_RECOVERY_DELAY_BASE_MS
+                : RECOVERY_DELAY_BASE_MS;
+        long maxDelayMs = reason.isCameraRecoveryCandidate()
+                ? CAMERA_RECOVERY_DELAY_MAX_MS
+                : RECOVERY_DELAY_MAX_MS;
+        for (int i = 1; i < consecutiveRecoveries; i++) {
+            delayMs = Math.min(delayMs * 2L, maxDelayMs);
+        }
+        return delayMs;
+    }
+
+    private static String describeRecoveryTarget(StopReason reason) {
+        if (reason.isCameraRecoveryCandidate()) {
+            return "camera pipeline";
+        }
+        if (reason.isEncoderRecoveryCandidate()) {
+            return "encoder pipeline";
+        }
+        return "streaming pipeline";
+    }
+
+    private static void logSessionStop(
+            StopReason reason,
+            long sessionDurationMs,
+            int consecutiveRecoveries
+    ) {
+        System.out.println(
+                "[Server] Session stop: code="
+                        + reason.getCode()
+                        + ", recoverable="
+                        + reason.isRecoverable()
+                        + ", target="
+                        + describeRecoveryTarget(reason)
+                        + ", durationMs="
+                        + sessionDurationMs
+                        + ", recoveryCount="
+                        + consecutiveRecoveries
+                        + ", message="
+                        + reason.getMessage()
+        );
+    }
+
+    private static void logFinalStopReason(StopReason reason) {
+        String classification = "abnormal";
+        if ("process_shutdown".equals(reason.getCode())) {
+            classification = "normal";
+        } else if ("socket_closed".equals(reason.getCode())) {
+            classification = "external_disconnect";
+        } else if ("socket_write_failed".equals(reason.getCode())) {
+            classification = "upstream_write_failure";
+        }
+
+        System.out.println(
+                "[Server] Final stop classification="
+                        + classification
+                        + ", code="
+                        + reason.getCode()
+                        + ", message="
+                        + reason.getMessage()
+        );
+    }
+
+    private static ServerConfig parseArgs(String[] args) {
+        ServerConfig config = new ServerConfig();
+
+        for (int i = 0; i < args.length; i++) {
+            switch (args[i]) {
+                case "--socket":
+                    config.socketName = args[++i];
+                    break;
+                case "--width":
+                    config.width = Integer.parseInt(args[++i]);
+                    break;
+                case "--height":
+                    config.height = Integer.parseInt(args[++i]);
+                    break;
+                case "--bitrate":
+                    config.bitrate = Integer.parseInt(args[++i]);
+                    break;
+                case "--fps":
+                    config.framerate = Integer.parseInt(args[++i]);
+                    break;
+                case "--camera":
+                    config.cameraId = args[++i];
+                    break;
+                default:
+                    System.err.println("[Server] Unknown argument: " + args[i]);
+                    break;
+            }
+        }
+
+        return config;
+    }
+
+    private static final class ServerConfig {
+        String socketName = DEFAULT_SOCKET_NAME;
+        int width = DEFAULT_WIDTH;
+        int height = DEFAULT_HEIGHT;
+        int bitrate = DEFAULT_BITRATE;
+        int framerate = DEFAULT_FRAMERATE;
+        String cameraId = DEFAULT_CAMERA_ID;
+    }
+
+    private static void closeQuietly(LocalSocket socket) {
+        if (socket == null) {
+            return;
+        }
+
+        try {
+            socket.close();
+        } catch (IOException e) {
+            // Ignore cleanup failures.
+        }
+    }
+
+    private static void closeQuietly(LocalServerSocket socket) {
+        if (socket == null) {
+            return;
+        }
+
+        try {
+            socket.close();
+        } catch (IOException e) {
+            // Ignore cleanup failures.
+        }
+    }
+}
