@@ -1,44 +1,34 @@
 "use client";
 
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Camera, X } from "lucide-react";
-import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import {startTransition, useCallback, useEffect, useMemo, useRef, useState} from "react";
+import {Camera, X} from "lucide-react";
+import {useTranslation} from "react-i18next";
+import {toast} from "sonner";
 
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import {Button} from "@/components/ui/button";
+import {Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,} from "@/components/ui/dialog";
 import {
   applyPerspectiveTransform,
   createFrameSource,
   DEFAULT_SCANNER_CONFIG,
   detectDocumentContour,
   enhanceDocumentImage,
-  StabilityTracker,
   type FrameSource,
   type FrameSourceState,
   type Point,
   type ScannerConfig,
+  StabilityTracker,
 } from "@/lib/scanner";
-import { isOpenCvReady } from "@/lib/scanner/opencv-runtime";
-import { getSelectedDesktopAdbSerial } from "@/lib/webadb/screenshot";
-import { useScannerStore } from "@/store/scanner-store";
-import { cn } from "@/lib/utils";
+import {isOpenCvReady} from "@/lib/scanner/opencv-runtime";
+import {getSelectedDesktopAdbSerial} from "@/lib/webadb/screenshot";
+import {useScannerStore} from "@/store/scanner-store";
+import {cn} from "@/lib/utils";
 
 import OpenCVLoader from "../OpenCVLoader";
-import { ScannerControls } from "./ScannerControls";
-import {
-  ScannerCvDebugCard,
-  ScannerDebugPanel,
-  ScannerPreviewDebugCard,
-} from "./ScannerDebugPanel";
-import { ScannerOverlay } from "./ScannerOverlay";
-import { ScannerPreviewHud } from "./ScannerPreviewHud";
+import {ScannerControls} from "./ScannerControls";
+import {ScannerCvDebugCard, ScannerDebugPanel, ScannerPreviewDebugCard,} from "./ScannerDebugPanel";
+import {ScannerOverlay} from "./ScannerOverlay";
+import {ScannerPreviewHud} from "./ScannerPreviewHud";
 
 export interface ScannerViewProps {
   isOpen: boolean;
@@ -413,8 +403,6 @@ export default function ScannerView({
   const applyPerfSample = useCallback((sample: FrontendPerfSample) => {
     setPreviewDebug({
       frameIndex: sample.frameIndex,
-      ipcMs: sample.ipcMs,
-      frameDecodeMs: sample.frameDecodeMs,
       payloadBytes: sample.payloadBytes,
       effectiveFps: sample.effectiveFps,
       pollCount: sample.pollCount,
@@ -501,8 +489,7 @@ export default function ScannerView({
       recentWindowFps: toNullableMetric(state.metrics.recentWindowFps),
       effectiveFps: toNullableMetric(state.metrics.effectiveFps),
       payloadBytes: toNullableMetric(state.metrics.lastPayloadBytes),
-      ipcMs: toNullableMetric(state.metrics.lastIpcMs),
-      frameDecodeMs: toNullableMetric(state.metrics.lastDecodeMs),
+      jsDecodeMs: toNullableMetric(state.metrics.lastDecodeMs),
       pollCount: state.metrics.pollCount > 0 ? state.metrics.pollCount : null,
       previewWidth: state.metrics.previewWidth,
       previewHeight: state.metrics.previewHeight,
@@ -578,7 +565,7 @@ export default function ScannerView({
     const previewFps = toFiniteNumber(record, ["previewFps", "currentFps"]);
     const recentWindowFps = toFiniteNumber(record, ["recentWindowFps", "windowFps"]);
     const effectiveFps = toFiniteNumber(record, ["effectiveFps"]);
-    const ipcMs = toFiniteNumber(record, ["ipcMs", "ipc"]);
+    // const ipcMs = toFiniteNumber(record, ["ipcMs", "ipc"]);
     const frameDecodeMs = toFiniteNumber(record, ["frameDecodeMs", "decodeMs"]);
     const payloadBytes = toFiniteNumber(record, ["payloadBytes", "payloadSize"]);
     const payloadKb = toFiniteNumber(record, ["payloadKb"]);
@@ -591,8 +578,8 @@ export default function ScannerView({
     if (previewFps !== null) previewPatch.previewFps = previewFps;
     if (recentWindowFps !== null) previewPatch.recentWindowFps = recentWindowFps;
     if (effectiveFps !== null) previewPatch.effectiveFps = effectiveFps;
-    if (ipcMs !== null) previewPatch.ipcMs = ipcMs;
-    if (frameDecodeMs !== null) previewPatch.frameDecodeMs = frameDecodeMs;
+    // if (ipcMs !== null) previewPatch.ipcMs = ipcMs;
+    if (frameDecodeMs !== null) previewPatch.jsDecodeMs = frameDecodeMs;
     if (payloadBytes !== null) previewPatch.payloadBytes = payloadBytes;
     if (payloadKb !== null) previewPatch.payloadBytes = Math.round(payloadKb * 1024);
     if (pollCount !== null) previewPatch.pollCount = Math.round(pollCount);

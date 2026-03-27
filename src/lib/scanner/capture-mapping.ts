@@ -5,6 +5,14 @@ export interface FrameDimensions {
   height: number;
 }
 
+export interface FrameMappingCompatibility {
+  compatible: boolean;
+  aspectDelta: number;
+  reason: string | null;
+}
+
+const DEFAULT_ASPECT_DELTA_TOLERANCE = 0.015;
+
 const assertValidDimensions = (dimensions: FrameDimensions, label: string): void => {
   if (!Number.isFinite(dimensions.width) || !Number.isFinite(dimensions.height)) {
     throw new Error(`${label} dimensions must be finite numbers.`);
@@ -17,6 +25,20 @@ const assertValidDimensions = (dimensions: FrameDimensions, label: string): void
 
 const clamp = (value: number, min: number, max: number): number => {
   return Math.min(max, Math.max(min, value));
+};
+
+const normalizedAspectRatio = (dimensions: FrameDimensions): number => {
+  const longer = Math.max(dimensions.width, dimensions.height);
+  const shorter = Math.min(dimensions.width, dimensions.height);
+  return longer / shorter;
+};
+
+const orientationLabel = (dimensions: FrameDimensions): "landscape" | "portrait" | "square" => {
+  if (dimensions.width === dimensions.height) {
+    return "square";
+  }
+
+  return dimensions.width > dimensions.height ? "landscape" : "portrait";
 };
 
 /**
@@ -48,4 +70,46 @@ export const scalePointsBetweenFrames = (
   target: FrameDimensions,
 ): Point[] => {
   return points.map((point) => scalePointBetweenFrames(point, source, target));
+};
+
+/**
+ * Validate whether preview-space points can be safely scaled into the target frame
+ * without silently assuming a mismatched crop or aspect ratio.
+ */
+export const evaluateFrameMappingCompatibility = (
+  source: FrameDimensions,
+  target: FrameDimensions,
+  maxAspectDelta: number = DEFAULT_ASPECT_DELTA_TOLERANCE,
+): FrameMappingCompatibility => {
+  assertValidDimensions(source, "Source");
+  assertValidDimensions(target, "Target");
+
+  const sourceOrientation = orientationLabel(source);
+  const targetOrientation = orientationLabel(target);
+
+  if (sourceOrientation !== targetOrientation) {
+    return {
+      compatible: false,
+      aspectDelta: 1,
+      reason: `Preview/still orientation mismatch (${sourceOrientation} -> ${targetOrientation}).`,
+    };
+  }
+
+  const sourceAspect = normalizedAspectRatio(source);
+  const targetAspect = normalizedAspectRatio(target);
+  const aspectDelta = Math.abs(sourceAspect - targetAspect) / sourceAspect;
+
+  if (aspectDelta > maxAspectDelta) {
+    return {
+      compatible: false,
+      aspectDelta,
+      reason: `Preview/still aspect ratio mismatch (${source.width}x${source.height} -> ${target.width}x${target.height}, delta=${aspectDelta.toFixed(4)}).`,
+    };
+  }
+
+  return {
+    compatible: true,
+    aspectDelta,
+    reason: null,
+  };
 };

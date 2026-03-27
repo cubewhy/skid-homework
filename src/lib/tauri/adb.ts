@@ -11,6 +11,10 @@ export interface TauriAdbConnectResult {
   message: string;
 }
 
+export interface TauriDecodeStreamHandle {
+  channel: unknown;
+}
+
 export interface TauriAdbPairRequest {
   address: string;
   pairingCode: string;
@@ -26,6 +30,21 @@ const invokeTauriCommand = async <T>(
 
   const { invoke } = await import("@tauri-apps/api/core");
   return await invoke<T>(command, payload);
+};
+
+const invokeTauriBinaryCommand = async (
+  command: string,
+  payload?: Record<string, unknown>,
+): Promise<Uint8Array> => {
+  const result = await invokeTauriCommand<unknown>(command, payload);
+  if (result instanceof ArrayBuffer) {
+    return new Uint8Array(result);
+  } else if (result instanceof Uint8Array) {
+    return result;
+  } else if (Array.isArray(result)) {
+    return Uint8Array.from(result as number[]);
+  }
+  throw new Error("Invalid binary response from Tauri command");
 };
 
 export const listTauriAdbDevices = async (): Promise<TauriAdbDevice[]> => {
@@ -49,10 +68,21 @@ export const connectTauriAdbDevice = async (
 export const captureTauriAdbScreenshot = async (
   serial: string,
 ): Promise<Uint8Array> => {
-  const bytes = await invokeTauriCommand<number[]>("tauri_adb_screenshot", {
+  return invokeTauriBinaryCommand("tauri_adb_screenshot", {
     serial,
   });
-  return Uint8Array.from(bytes);
+};
+
+export const captureTauriAdbStill = (
+  serial: string,
+  classpath: string,
+  socketName: string,
+): Promise<Uint8Array> => {
+  return invokeTauriBinaryCommand("tauri_adb_capture_still", {
+    serial,
+    classpath,
+    socketName,
+  });
 };
 
 export const shellTauriAdbCommand = async (
@@ -127,27 +157,37 @@ export const stopTauriAdbServer = async (
 
 export const startTauriDecodeStream = async (
   port: number,
-): Promise<void> => {
-  return await invokeTauriCommand<void>("tauri_scanner_start_stream", {
-    port,
+  onFrame: (framePacket: ArrayBuffer | Uint8Array) => void,
+): Promise<TauriDecodeStreamHandle> => {
+  if (!isTauri()) {
+    throw new Error("Tauri decoded frame streaming is only available in Tauri desktop builds.");
+  }
+
+  const { invoke, Channel } = await import("@tauri-apps/api/core");
+  const frameChannel = new Channel<string | ArrayBuffer | Uint8Array | number[]>(async (framePacket) => {
+    if (typeof framePacket === "string") {
+      const res = await fetch(`data:application/octet-stream;base64,${framePacket}`);
+      const buffer = await res.arrayBuffer();
+      onFrame(buffer);
+    } else {
+      if (Array.isArray(framePacket)) {
+        onFrame(Uint8Array.from(framePacket));
+      } else {
+        onFrame(framePacket);
+      }
+    }
   });
+
+  await invoke<void>("tauri_scanner_start_stream", {
+    port,
+    frameChannel,
+  });
+
+  return {
+    channel: frameChannel,
+  };
 };
 
 export const stopTauriDecodeStream = async (): Promise<void> => {
   return await invokeTauriCommand<void>("tauri_scanner_stop_stream");
 };
-
-/**
- * Poll the latest decoded video frame from the Rust H.264 stream decoder.
- * Returns a raw Uint8Array, where byte 0 is the frame codec, bytes 1..5 are
- * the big-endian width, bytes 5..9 are the big-endian height, and the remaining
- * bytes are codec-specific image payload data.
- * Returns an empty array if no new frame is available.
- */
-export const getTauriDecodedFrame = async (): Promise<Uint8Array> => {
-  if (!isTauri()) {
-    throw new Error("Tauri decoded frame polling is only available in Tauri desktop builds.");
-  }
-  return await invokeTauriCommand<Uint8Array>("tauri_scanner_get_frame");
-};
-

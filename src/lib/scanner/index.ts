@@ -18,10 +18,14 @@ export type {
   ScannerStillCapture,
 } from "./frame-source";
 
-export { detectDocumentContour } from "./document-detector";
+export { buildDocumentContourDetectionOptions, detectDocumentContour } from "./document-detector";
 export type { Point } from "./document-detector";
 export { StabilityTracker } from "./stability-tracker";
 export { applyPerspectiveTransform } from "./perspective-transform";
 export { enhanceDocumentImage } from "./document-enhancer";
-export { scalePointBetweenFrames, scalePointsBetweenFrames } from "./capture-mapping";
-export type { FrameDimensions } from "./capture-mapping";
+export {
+  evaluateFrameMappingCompatibility,
+  scalePointBetweenFrames,
+  scalePointsBetweenFrames,
+} from "./capture-mapping";
+export type { FrameDimensions, FrameMappingCompatibility } from "./capture-mapping";

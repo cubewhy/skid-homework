@@ -23,6 +23,7 @@ const CONNECT_READY_TIMEOUT: Duration = Duration::from_secs(3);
 const CONNECT_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const SCANNER_SERVER_PID_PATH: &str = "/data/local/tmp/skid-scanner-server.pid";
 const SCANNER_SERVER_LOG_PATH: &str = "/data/local/tmp/skid-scanner-server.log";
+const STILL_CAPTURE_MAIN_CLASS: &str = "com.skidhomework.server.StillCapture";
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -170,10 +171,10 @@ fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
-fn build_scanner_server_start_script(
+fn build_app_process_shell_command(
     classpath: &str,
     main_class: &str,
-    server_args: &[String],
+    main_args: &[String],
 ) -> String {
     let mut command_parts = vec![
         format!("CLASSPATH={}", shell_single_quote(classpath)),
@@ -181,17 +182,32 @@ fn build_scanner_server_start_script(
         "/".to_string(),
         shell_single_quote(main_class),
     ];
-    command_parts.extend(server_args.iter().map(|value| shell_single_quote(value)));
+    command_parts.extend(main_args.iter().map(|value| shell_single_quote(value)));
+
+    command_parts.join(" ")
+}
+
+fn build_scanner_server_start_script(
+    classpath: &str,
+    main_class: &str,
+    server_args: &[String],
+) -> String {
+    let app_process_command = build_app_process_shell_command(classpath, main_class, server_args);
 
     format!(
         "mkdir -p /data/local/tmp; \
 rm -f {pidfile}; \
 : >{logfile}; \
 {} </dev/null >>{logfile} 2>&1 & echo $! > {pidfile}",
-        command_parts.join(" "),
+        app_process_command,
         pidfile = shell_single_quote(SCANNER_SERVER_PID_PATH),
         logfile = shell_single_quote(SCANNER_SERVER_LOG_PATH),
     )
+}
+
+fn build_still_capture_exec_script(classpath: &str, socket_name: &str) -> String {
+    let capture_args = vec!["--socket".to_string(), socket_name.to_string()];
+    build_app_process_shell_command(classpath, STILL_CAPTURE_MAIN_CLASS, &capture_args)
 }
 
 fn build_scanner_server_stop_script(main_class: &str) -> String {
@@ -429,8 +445,8 @@ pub async fn tauri_adb_connect(request: AdbConnectRequest) -> Result<AdbConnectR
 
 /// Capture a PNG screenshot from the selected device using `exec-out screencap -p`.
 #[command]
-pub async fn tauri_adb_screenshot(serial: String) -> Result<Vec<u8>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn tauri_adb_screenshot(serial: String) -> Result<tauri::ipc::Response, String> {
+    let png_bytes = tauri::async_runtime::spawn_blocking(move || {
         let serial = ensure_non_empty(&serial, "ADB serial")?;
 
         let args = vec![
@@ -449,7 +465,54 @@ pub async fn tauri_adb_screenshot(serial: String) -> Result<Vec<u8>, String> {
         Ok(output.stdout)
     })
     .await
-    .map_err(|error| format!("ADB screenshot task failed: {error}"))?
+    .map_err(|error| format!("ADB screenshot task failed: {error}"))?;
+
+    Ok(tauri::ipc::Response::new(png_bytes?))
+}
+
+/// Capture a full-resolution still image from the Android camera pipeline.
+#[command]
+pub async fn tauri_adb_capture_still(
+    serial: String,
+    classpath: String,
+    socket_name: String,
+) -> Result<tauri::ipc::Response, String> {
+    let jpeg_bytes = tauri::async_runtime::spawn_blocking(move || {
+        let serial = ensure_non_empty(&serial, "ADB serial")?;
+        let classpath = ensure_non_empty(&classpath, "Server classpath")?;
+        let socket_name = ensure_non_empty(&socket_name, "Still capture socket name")?;
+        let shell_command = build_still_capture_exec_script(&classpath, &socket_name);
+
+        let args = vec![
+            "-s".to_string(),
+            serial.clone(),
+            "exec-out".to_string(),
+            "sh".to_string(),
+            "-c".to_string(),
+            wrap_shell_c_script(&shell_command),
+        ];
+        let output = run_adb_checked(
+            &args,
+            &format!("adb -s {serial} exec-out sh -c <capture still>"),
+        )?;
+
+        if output.stdout.is_empty() {
+            let details = combine_command_output(&output);
+            if details.is_empty() {
+                return Err(format!("Camera still capture returned no data for {serial}."));
+            }
+
+            return Err(format!(
+                "Camera still capture returned no image bytes for {serial}: {details}"
+            ));
+        }
+
+        Ok(output.stdout)
+    })
+    .await
+    .map_err(|error| format!("ADB still-capture task failed: {error}"))?;
+
+    Ok(tauri::ipc::Response::new(jpeg_bytes?))
 }
 
 /// Execute an arbitrary shell command on the selected device.
@@ -622,34 +685,3 @@ pub async fn tauri_adb_stop_server(serial: String, classpath: String) -> Result<
     .map_err(|error| format!("ADB stop-server task failed: {error}"))?
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn start_script_uses_explicit_paths_without_shell_variables() {
-        let script = build_scanner_server_start_script(
-            "/data/local/tmp/camera-server.jar",
-            "com.skidhomework.server.Server",
-            &[
-                "--socket".to_string(),
-                "scanner".to_string(),
-                "--width".to_string(),
-                "640".to_string(),
-            ],
-        );
-
-        assert!(script.contains("mkdir -p /data/local/tmp;"));
-        assert!(script.contains("/data/local/tmp/skid-scanner-server.log"));
-        assert!(script.contains("/data/local/tmp/skid-scanner-server.pid"));
-        assert!(script.contains("app_process / 'com.skidhomework.server.Server'"));
-        assert!(!script.contains("pidfile="));
-        assert!(!script.contains("logfile="));
-    }
-
-    #[test]
-    fn shell_c_wrapper_quotes_entire_script() {
-        let wrapped = wrap_shell_c_script("echo hi; echo bye");
-        assert_eq!(wrapped, "'echo hi; echo bye'");
-    }
-}

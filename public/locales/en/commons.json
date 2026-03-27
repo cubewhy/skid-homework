@@ -391,9 +391,9 @@
       },
       "target": "{{fps}}+ FPS",
       "metrics": {
-        "now": "now",
+        "now": "inst",
         "window": "win",
-        "effective": "eff",
+        "effective": "stream",
         "frame": "frame",
         "resolution": "res"
       }
@@ -433,29 +433,30 @@
           "pending": "PENDING",
           "fail": "FAIL"
         },
-        "current": "current {{state}} (>= {{fps}} FPS)",
+        "current": "instant {{state}} (>= {{fps}} FPS)",
         "window": "window {{state}}",
-        "effective": "effective {{state}}"
+        "effective": "stream {{state}}"
       },
       "metrics": {
         "current-fps": {
-          "label": "Current FPS",
+          "label": "Instant FPS",
           "hint": "Latest frame interval"
         },
         "window-fps": {
-          "label": "Recent Window FPS",
-          "hint": "Short rolling preview window"
+          "label": "Window FPS",
+          "hint": "Contiguous short rolling window"
         },
         "effective-fps": {
-          "label": "Effective FPS",
-          "hint": "Transport sample"
+          "label": "Stream FPS",
+          "hint": "Average since first frame, excluding reconnect downtime"
         },
         "frame-index": "Frame Index",
         "preview-resolution": "Preview Resolution",
         "payload-size": "Payload Size",
         "poll-count": "Poll Count",
-        "ipc": "IPC",
-        "frame-decode": "Frame Decode",
+        "poll-wait": "Invoke Wait",
+        "js-decode": "JS Decode",
+        "canvas-draw": "Canvas Draw",
         "last-update": "Last Update",
         "reconnect-status": "Reconnect Status",
         "recent-error": "Recent Error"

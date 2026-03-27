@@ -701,7 +701,8 @@ interface Resources {
         "reconnect": "Reconnect ADB",
         "screenshot": "ADB Screenshot",
         "screenshot-busy": "Capturing...",
-        "screenshot-hint": "Capture a screenshot from a connected Android device via ADB"
+        "screenshot-hint": "Capture a screenshot from a connected Android device via ADB",
+        "document-scanner": "Document Scanner"
       },
       "camera-help-aria": "Camera help",
       "camera-tip": {
@@ -725,6 +726,196 @@ interface Resources {
       },
       "upload": "Upload Files",
       "upload-tip": "Images and text files are supported. PDFs require an active Gemini or OpenAI (Responses API enabled) source."
+    },
+    "document-scanner": {
+      "title": "Document Scanner",
+      "actions": {
+        "send-to-ai": "Send to AI ({{count}})"
+      },
+      "overlay": {
+        "processing": "Processing capture...",
+        "connecting": "Connecting to device camera...",
+        "idle": "Start the real-time preview to align a document.",
+        "error-title": "Scanner Error"
+      },
+      "captured": {
+        "title": "Captured Documents",
+        "description": "Preview captures are collected here for review and export.",
+        "item-count": "{{count}} item",
+        "item-count_plural": "{{count}} items",
+        "preview-alt": "Captured document {{index}}"
+      },
+      "connection": {
+        "recovering": "Recovering preview stream...",
+        "starting": "Starting preview stream...",
+        "recovered": "Preview stream recovered.",
+        "active": "Preview stream active.",
+        "recovering-delay": "Recovering preview stream in {{delayMs}}ms.",
+        "stopped-by-user": "Preview stopped by user.",
+        "stopped": "Preview stream stopped.",
+        "failed": "Preview stream failed.",
+        "idle": "Scanner idle.",
+        "started": "Preview stream started.",
+        "start-failed": "Failed to start preview stream."
+      },
+      "toasts": {
+        "scanner-error": "Scanner error: {{message}}",
+        "auto-capturing-preview": "Auto-capturing from preview...",
+        "capturing-preview": "Capturing from preview...",
+        "preview-ready": "Preview capture ready.",
+        "preview-failed": "Preview capture failed: {{message}}",
+        "no-device": "No ADB device connected. Please connect a device first.",
+        "server-jar-missing": "Failed to locate camera-server.jar resource.",
+        "start-failed": "Failed to start scanner: {{message}}",
+        "no-documents": "No documents captured yet."
+      },
+      "controls": {
+        "title": "Live Preview Controls",
+        "description": "Start the camera preview, capture from the live stream, and tune auto-capture.",
+        "badges": {
+          "live": "Live",
+          "stopped": "Stopped",
+          "stable": "Stable",
+          "unstable": "Unstable"
+        },
+        "metrics": {
+          "preview-resolution": "Preview Resolution",
+          "reconnect-state": "Reconnect State"
+        },
+        "actions": {
+          "connecting": "Connecting...",
+          "start": "Start Preview",
+          "stop": "Stop Preview",
+          "processing": "Processing...",
+          "capture": "Capture Preview",
+          "use-landscape": "Use Landscape Frame",
+          "use-portrait": "Use Portrait Frame"
+        },
+        "auto-capture": {
+          "label": "Auto-Capture",
+          "description": "Automatically capture once the document contour becomes stable."
+        },
+        "states": {
+          "reconnect": {
+            "connected": "Connected",
+            "connecting": "Connecting",
+            "error": "Error",
+            "idle": "Idle",
+            "reconnecting": "Reconnecting",
+            "stopped": "Stopped"
+          }
+        }
+      },
+      "preview-hud": {
+        "state": {
+          "pass": "PASS",
+          "pending": "PENDING",
+          "fail": "FAIL"
+        },
+        "target": "{{fps}}+ FPS",
+        "metrics": {
+          "now": "now",
+          "window": "win",
+          "effective": "eff",
+          "frame": "frame",
+          "resolution": "res"
+        }
+      },
+      "debug": {
+        "preview": {
+          "title": "Real-Time Preview",
+          "description": "Low-latency preview transport metrics and live stream status."
+        },
+        "cv": {
+          "title": "CV Debug",
+          "description": "Contour detection, stability, corner points, and processing resolution.",
+          "badges": {
+            "ready": "OpenCV ready",
+            "unavailable": "OpenCV unavailable",
+            "document-detected": "Document detected",
+            "no-document": "No document",
+            "stable": "Stable",
+            "unstable": "Unstable",
+            "processing": "Processing",
+            "idle": "Idle"
+          },
+          "metrics": {
+            "corner-count": "Corner Count",
+            "processing-resolution": "Processing Resolution",
+            "auto-capture": "Auto-Capture",
+            "enabled": "Enabled",
+            "disabled": "Disabled",
+            "last-update": "Last CV Update",
+            "corner-label": "Corner {{corner}}"
+          },
+          "empty": "No active contour points are available yet. Keep the document inside the preview frame and ensure OpenCV has loaded."
+        },
+        "badges": {
+          "state": {
+            "pass": "PASS",
+            "pending": "PENDING",
+            "fail": "FAIL"
+          },
+          "current": "current {{state}} (>= {{fps}} FPS)",
+          "window": "window {{state}}",
+          "effective": "effective {{state}}"
+        },
+        "metrics": {
+          "current-fps": {
+            "label": "Current FPS",
+            "hint": "Latest frame interval"
+          },
+          "window-fps": {
+            "label": "Recent Window FPS",
+            "hint": "Short rolling preview window"
+          },
+          "effective-fps": {
+            "label": "Effective FPS",
+            "hint": "Transport sample"
+          },
+          "frame-index": "Frame Index",
+          "preview-resolution": "Preview Resolution",
+          "payload-size": "Payload Size",
+          "poll-count": "Poll Count",
+          "ipc": "IPC",
+          "poll-wait": "Invoke Wait",
+          "frame-decode": "Frame Decode",
+          "js-decode": "JS Decode",
+          "canvas-draw": "Canvas Draw",
+          "last-update": "Last Update",
+          "reconnect-status": "Reconnect Status",
+          "recent-error": "Recent Error"
+        },
+        "hints": {
+          "reconnect-attempt": "Attempt {{attempt}} / {{max}}",
+          "no-reconnect-attempt": "No reconnect attempt reported.",
+          "last-disconnect": "Last disconnect {{time}}",
+          "no-disconnect": "No disconnect recorded."
+        },
+        "states": {
+          "status": {
+            "idle": "Idle",
+            "connecting": "Connecting",
+            "streaming": "Streaming",
+            "error": "Error"
+          },
+          "reconnect": {
+            "connected": "Connected",
+            "connecting": "Connecting",
+            "reconnecting": "Reconnecting",
+            "stopped": "Stopped",
+            "error": "Error",
+            "idle": "Idle",
+            "starting": "Starting",
+            "stopping": "Stopping"
+          },
+          "pipeline": {
+            "idle": "idle",
+            "preview": "preview",
+            "single-hq": "single-hq"
+          }
+        }
+      }
     },
     "uploads-info": {
       "selected": "Selected"

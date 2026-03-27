@@ -8,175 +8,707 @@ export interface DocumentContourOptions {
   maxHeight?: number;
 }
 
-const CONTOUR_AREA_MIN_RATIO = 0.08;
-const CONTOUR_AREA_MAX_RATIO = 0.98;
-const APPROXIMATION_EPSILON_FACTORS = [0.015, 0.02, 0.03, 0.04, 0.05] as const;
-const MAX_SCORING_CONTOURS = 15;
-const MIN_ACCEPTABLE_QUAD_SCORE = 2.2;
-const BORDER_TOUCH_MARGIN_RATIO = 0.02;
+export const buildDocumentContourDetectionOptions = (
+  width: number,
+  height: number,
+  options: DocumentContourOptions = {},
+): DocumentContourOptions => {
+  const targetSize = buildReferenceProcessingSize(width, height, options);
+  return {
+    maxWidth: targetSize.width,
+    maxHeight: targetSize.height,
+  };
+};
+
+interface PolarLine {
+  id: number;
+  phi: number;
+  rho: number;
+  votes: number;
+}
+
+interface HoughSpace {
+  accumulator: Uint32Array;
+  rhoValues: number[];
+  thetaValues: number[];
+  rhoCount: number;
+  thetaCount: number;
+}
+
+interface IntersectionCandidate {
+  point: Point;
+  lineV: PolarLine;
+  lineH: PolarLine;
+  corners: [Point, Point, Point, Point];
+  connectivity: [number, number, number, number];
+  orientation: [number, number, number, number];
+}
+
+interface FrameCandidate {
+  points: [Point, Point, Point, Point];
+  score: number;
+}
+
+interface ImageMaskMat {
+  cols: number;
+  rows: number;
+  data: Uint8Array;
+  ucharPtr: (row: number, col: number) => Uint8Array;
+  delete: () => void;
+}
+
+const REFERENCE_TARGET_SHORT_SIDE = 500;
+const PREPROCESS_MEDIAN_KERNEL_SIZE = 25;
+const PREPROCESS_MORPH_KERNEL_SIZE = 15;
+const CANNY_THRESHOLD_LOWER = 10;
+const CANNY_THRESHOLD_UPPER = 70;
+const CONTOUR_THICKNESS = 3;
+const DILATE_KERNEL_SIZE = 15;
+const ERODE_KERNEL_SIZE = 3;
+const THETA_START = -Math.PI / 4;
+const THETA_END = (3 * Math.PI) / 4;
+const THETA_SAMPLE_COUNT = 180;
+const HOUGH_MIN_DISTANCE = 10;
+const HOUGH_MIN_ANGLE = 50;
+const HOUGH_THRESHOLD_RATIO = 0.49;
+const LINE_ANGLE_ERROR = Math.PI / 12;
+const INTERSECTION_ALONG_LENGTH = 50;
+const INTERSECTION_SAMPLE_WIDTH = 3;
+const ORIENTATION_SCORE_THRESHOLD = 0.4;
+const FRAME_AREA_THRESHOLD = 0.3;
 
 const clamp = (value: number, min: number, max: number): number => {
   return Math.min(max, Math.max(min, value));
 };
 
-const distanceBetweenPoints = (first: Point, second: Point): number => {
-  return Math.hypot(first.x - second.x, first.y - second.y);
-};
-
-const rotateLeft = <T>(values: T[], offset: number): T[] => {
-  if (values.length === 0) {
-    return values;
+const linspace = (start: number, end: number, count: number): number[] => {
+  if (count <= 1) {
+    return [start];
   }
 
-  const normalizedOffset = ((offset % values.length) + values.length) % values.length;
-  return values.slice(normalizedOffset).concat(values.slice(0, normalizedOffset));
+  const step = (end - start) / (count - 1);
+  return Array.from({ length: count }, (_, index) => start + (index * step));
 };
 
-const computePolygonArea = (points: Point[]): number => {
-  if (points.length < 3) {
-    return 0;
+const buildReferenceProcessingSize = (
+  width: number,
+  height: number,
+  options: DocumentContourOptions,
+): { width: number; height: number } => {
+  const hasExplicitWidth = typeof options.maxWidth === "number" && Number.isFinite(options.maxWidth);
+  const hasExplicitHeight = typeof options.maxHeight === "number" && Number.isFinite(options.maxHeight);
+  if (hasExplicitWidth && hasExplicitHeight) {
+    return {
+      width: Math.max(1, Math.round(options.maxWidth as number)),
+      height: Math.max(1, Math.round(options.maxHeight as number)),
+    };
   }
 
-  let area = 0;
-  for (let index = 0; index < points.length; index += 1) {
-    const current = points[index];
-    const next = points[(index + 1) % points.length];
-    area += (current.x * next.y) - (next.x * current.y);
-  }
-
-  return Math.abs(area) / 2;
-};
-
-const computeBoundingBoxArea = (points: Point[]): number => {
-  const xs = points.map((point) => point.x);
-  const ys = points.map((point) => point.y);
-  const width = Math.max(...xs) - Math.min(...xs);
-  const height = Math.max(...ys) - Math.min(...ys);
-  return Math.max(1, width * height);
-};
-
-const computeAngleCosine = (previous: Point, current: Point, next: Point): number => {
-  const vectorA = {
-    x: previous.x - current.x,
-    y: previous.y - current.y,
+  const shortSide = Math.max(1, Math.min(width, height));
+  const scale = REFERENCE_TARGET_SHORT_SIDE / shortSide;
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
   };
-  const vectorB = {
-    x: next.x - current.x,
-    y: next.y - current.y,
-  };
-
-  const vectorAMagnitude = Math.hypot(vectorA.x, vectorA.y);
-  const vectorBMagnitude = Math.hypot(vectorB.x, vectorB.y);
-  if (vectorAMagnitude === 0 || vectorBMagnitude === 0) {
-    return 1;
-  }
-
-  const cosine = ((vectorA.x * vectorB.x) + (vectorA.y * vectorB.y))
-    / (vectorAMagnitude * vectorBMagnitude);
-  return Math.abs(cosine);
 };
 
-const computeRightAngleScore = (points: Point[]): number => {
-  if (points.length !== 4) {
-    return 0;
-  }
+const buildPreparedChannel = (
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  cv: any,
+  channel: ImageMaskMat,
+): ImageMaskMat => {
+  const blurred = new cv.Mat();
+  const equalized = new cv.Mat();
+  const opened = new cv.Mat();
+  const closed = new cv.Mat();
+  const morphKernel = cv.getStructuringElement(
+    cv.MORPH_RECT,
+    new cv.Size(PREPROCESS_MORPH_KERNEL_SIZE, PREPROCESS_MORPH_KERNEL_SIZE),
+  );
 
-  let scoreSum = 0;
-  for (let index = 0; index < points.length; index += 1) {
-    const previous = points[(index + points.length - 1) % points.length];
-    const current = points[index];
-    const next = points[(index + 1) % points.length];
-    scoreSum += 1 - clamp(computeAngleCosine(previous, current, next), 0, 1);
+  try {
+    cv.medianBlur(channel, blurred, PREPROCESS_MEDIAN_KERNEL_SIZE);
+    cv.equalizeHist(blurred, equalized);
+    cv.morphologyEx(equalized, opened, cv.MORPH_OPEN, morphKernel);
+    cv.morphologyEx(opened, closed, cv.MORPH_CLOSE, morphKernel);
+    return closed.clone();
+  } finally {
+    blurred.delete();
+    equalized.delete();
+    opened.delete();
+    closed.delete();
+    morphKernel.delete();
   }
-
-  return scoreSum / points.length;
 };
 
-const computeSideBalanceScore = (points: Point[]): number => {
-  const [topLeft, topRight, bottomRight, bottomLeft] = points;
-  const topWidth = distanceBetweenPoints(topLeft, topRight);
-  const bottomWidth = distanceBetweenPoints(bottomLeft, bottomRight);
-  const leftHeight = distanceBetweenPoints(topLeft, bottomLeft);
-  const rightHeight = distanceBetweenPoints(topRight, bottomRight);
+const buildContourMasks = (
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  cv: any,
+  prepared: ImageMaskMat,
+): {
+  houghMask: ImageMaskMat;
+  connectivityMask: ImageMaskMat;
+} => {
+  const filtered = new cv.Mat();
+  const cannyEdges = new cv.Mat();
+  const contours = new cv.MatVector();
+  const hierarchy = new cv.Mat();
+  const contourMask = cv.Mat.zeros(prepared.rows, prepared.cols, cv.CV_8UC1);
+  const houghMask = new cv.Mat();
+  const connectivityMask = new cv.Mat();
+  const dilateKernel = cv.getStructuringElement(
+    cv.MORPH_RECT,
+    new cv.Size(DILATE_KERNEL_SIZE, DILATE_KERNEL_SIZE),
+  );
+  const erodeKernel = cv.getStructuringElement(
+    cv.MORPH_RECT,
+    new cv.Size(ERODE_KERNEL_SIZE, ERODE_KERNEL_SIZE),
+  );
 
-  const widthBalance = Math.min(topWidth, bottomWidth) / Math.max(topWidth, bottomWidth, 1);
-  const heightBalance = Math.min(leftHeight, rightHeight) / Math.max(leftHeight, rightHeight, 1);
-  return (widthBalance + heightBalance) / 2;
-};
+  try {
+    cv.bitwise_and(prepared, prepared, filtered);
+    cv.Canny(
+      filtered,
+      cannyEdges,
+      CANNY_THRESHOLD_LOWER,
+      CANNY_THRESHOLD_UPPER,
+      3,
+      true,
+    );
+    cv.findContours(
+      cannyEdges,
+      contours,
+      hierarchy,
+      cv.RETR_EXTERNAL,
+      cv.CHAIN_APPROX_SIMPLE,
+    );
+    cv.drawContours(contourMask, contours, -1, new cv.Scalar(255), CONTOUR_THICKNESS);
+    cv.morphologyEx(contourMask, connectivityMask, cv.MORPH_DILATE, dilateKernel);
+    cv.morphologyEx(contourMask, houghMask, cv.MORPH_ERODE, erodeKernel);
 
-const computeAreaScore = (
-  points: Point[],
-  frameWidth: number,
-  frameHeight: number,
-): number => {
-  const frameArea = Math.max(1, frameWidth * frameHeight);
-  const areaRatio = computePolygonArea(points) / frameArea;
-  if (areaRatio < CONTOUR_AREA_MIN_RATIO || areaRatio > CONTOUR_AREA_MAX_RATIO) {
-    return 0;
+    return {
+      houghMask: houghMask.clone(),
+      connectivityMask: connectivityMask.clone(),
+    };
+  } finally {
+    filtered.delete();
+    cannyEdges.delete();
+    contours.delete();
+    hierarchy.delete();
+    contourMask.delete();
+    houghMask.delete();
+    connectivityMask.delete();
+    dilateKernel.delete();
+    erodeKernel.delete();
   }
-
-  const targetAreaRatio = 0.42;
-  const normalizedDistance = Math.min(1, Math.abs(areaRatio - targetAreaRatio) / targetAreaRatio);
-  return 1 - normalizedDistance;
 };
 
-const computeBorderTouchPenalty = (
-  points: Point[],
-  frameWidth: number,
-  frameHeight: number,
-): number => {
-  const marginX = Math.max(4, frameWidth * BORDER_TOUCH_MARGIN_RATIO);
-  const marginY = Math.max(4, frameHeight * BORDER_TOUCH_MARGIN_RATIO);
+const buildHoughSpace = (
+  mask: ImageMaskMat,
+): HoughSpace => {
+  const thetaValues = linspace(THETA_START, THETA_END, THETA_SAMPLE_COUNT);
+  const rhoOffset = Math.ceil(Math.hypot(mask.rows, mask.cols));
+  const rhoValues = Array.from(
+    { length: (rhoOffset * 2) + 1 },
+    (_, index) => index - rhoOffset,
+  );
+  const rhoCount = rhoValues.length;
+  const thetaCount = thetaValues.length;
+  const accumulator = new Uint32Array(rhoCount * thetaCount);
+  const cosValues = thetaValues.map((theta) => Math.cos(theta));
+  const sinValues = thetaValues.map((theta) => Math.sin(theta));
+  const data = mask.data;
 
-  let touchingPoints = 0;
-  for (const point of points) {
-    if (
-      point.x <= marginX
-      || point.x >= frameWidth - marginX
-      || point.y <= marginY
-      || point.y >= frameHeight - marginY
-    ) {
-      touchingPoints += 1;
+  for (let row = 0; row < mask.rows; row += 1) {
+    const rowOffset = row * mask.cols;
+    for (let col = 0; col < mask.cols; col += 1) {
+      if (data[rowOffset + col] === 0) {
+        continue;
+      }
+
+      for (let thetaIndex = 0; thetaIndex < thetaCount; thetaIndex += 1) {
+        const rhoIndex = Math.round(
+          (col * cosValues[thetaIndex]) + (row * sinValues[thetaIndex]),
+        ) + rhoOffset;
+        if (rhoIndex < 0 || rhoIndex >= rhoCount) {
+          continue;
+        }
+
+        accumulator[(rhoIndex * thetaCount) + thetaIndex] += 1;
+      }
     }
   }
 
-  return Math.min(1, touchingPoints / points.length);
+  return {
+    accumulator,
+    rhoValues,
+    thetaValues,
+    rhoCount,
+    thetaCount,
+  };
 };
 
-const computeQuadScore = (
-  points: Point[],
-  contourArea: number,
-  frameWidth: number,
-  frameHeight: number,
-): number => {
-  const polygonArea = computePolygonArea(points);
-  if (polygonArea <= 0) {
-    return 0;
+const collectLinesFromHoughSpace = (
+  mask: ImageMaskMat,
+): { vertical: PolarLine[]; horizontal: PolarLine[] } => {
+  const houghSpace = buildHoughSpace(mask);
+  let maxVotes = 0;
+
+  for (let index = 0; index < houghSpace.accumulator.length; index += 1) {
+    if (houghSpace.accumulator[index] > maxVotes) {
+      maxVotes = houghSpace.accumulator[index];
+    }
   }
 
-  const extentScore = clamp(polygonArea / computeBoundingBoxArea(points), 0, 1);
-  const contourCoverageScore = clamp(contourArea / polygonArea, 0, 1);
-  const rightAngleScore = computeRightAngleScore(points);
-  const sideBalanceScore = computeSideBalanceScore(points);
-  const areaScore = computeAreaScore(points, frameWidth, frameHeight);
-  const borderTouchPenalty = computeBorderTouchPenalty(points, frameWidth, frameHeight);
+  if (maxVotes === 0) {
+    return {
+      vertical: [],
+      horizontal: [],
+    };
+  }
 
-  return (
-    (rightAngleScore * 2.2)
-    + (extentScore * 1.2)
-    + (contourCoverageScore * 0.9)
-    + (sideBalanceScore * 0.7)
-    + (areaScore * 1.0)
-    - (borderTouchPenalty * 0.8)
+  const threshold = maxVotes * HOUGH_THRESHOLD_RATIO;
+  const candidates: Array<{ rhoIndex: number; thetaIndex: number; votes: number }> = [];
+
+  for (let rhoIndex = 0; rhoIndex < houghSpace.rhoCount; rhoIndex += 1) {
+    for (let thetaIndex = 0; thetaIndex < houghSpace.thetaCount; thetaIndex += 1) {
+      const votes = houghSpace.accumulator[(rhoIndex * houghSpace.thetaCount) + thetaIndex];
+      if (votes >= threshold) {
+        candidates.push({ rhoIndex, thetaIndex, votes });
+      }
+    }
+  }
+
+  candidates.sort((left, right) => right.votes - left.votes);
+
+  const vertical: PolarLine[] = [];
+  const horizontal: PolarLine[] = [];
+  const accepted: Array<{ rhoIndex: number; thetaIndex: number }> = [];
+  let nextLineId = 0;
+
+  for (const candidate of candidates) {
+    const suppressed = accepted.some((peak) => {
+      return (
+        Math.abs(peak.rhoIndex - candidate.rhoIndex) <= HOUGH_MIN_DISTANCE
+        && Math.abs(peak.thetaIndex - candidate.thetaIndex) <= HOUGH_MIN_ANGLE
+      );
+    });
+    if (suppressed) {
+      continue;
+    }
+
+    accepted.push({
+      rhoIndex: candidate.rhoIndex,
+      thetaIndex: candidate.thetaIndex,
+    });
+
+    const line: PolarLine = {
+      id: nextLineId,
+      phi: houghSpace.thetaValues[candidate.thetaIndex],
+      rho: houghSpace.rhoValues[candidate.rhoIndex],
+      votes: candidate.votes,
+    };
+    nextLineId += 1;
+
+    if (Math.abs(line.phi) < LINE_ANGLE_ERROR || Math.abs(line.phi - Math.PI) < LINE_ANGLE_ERROR) {
+      vertical.push(line);
+    } else if (Math.abs(line.phi - (Math.PI / 2)) < LINE_ANGLE_ERROR) {
+      horizontal.push(line);
+    }
+  }
+
+  return {
+    vertical,
+    horizontal,
+  };
+};
+
+const findPointsOnLine = (line: PolarLine, xValues: [number, number]): [Point, Point] => {
+  const [leftX, rightX] = xValues;
+  const denominator = Math.sin(line.phi);
+  const safeDenominator = Math.abs(denominator) < 1e-6
+    ? (denominator >= 0 ? 1e-6 : -1e-6)
+    : denominator;
+
+  return [
+    {
+      x: leftX,
+      y: (line.rho - (leftX * Math.cos(line.phi))) / safeDenominator,
+    },
+    {
+      x: rightX,
+      y: (line.rho - (rightX * Math.cos(line.phi))) / safeDenominator,
+    },
+  ];
+};
+
+const pointsToGeneralLine = (
+  firstPoint: Point,
+  secondPoint: Point,
+): { a: number; b: number; c: number } => {
+  return {
+    a: firstPoint.y - secondPoint.y,
+    b: secondPoint.x - firstPoint.x,
+    c: (firstPoint.x * secondPoint.y) - (secondPoint.x * firstPoint.y),
+  };
+};
+
+const intersectCartesianLines = (
+  firstLine: { a: number; b: number; c: number },
+  secondLine: { a: number; b: number; c: number },
+): Point | null => {
+  const determinant = (firstLine.a * secondLine.b) - (firstLine.b * secondLine.a);
+  if (Math.abs(determinant) < 1e-6) {
+    return null;
+  }
+
+  const x = ((firstLine.b * secondLine.c) - (firstLine.c * secondLine.b)) / determinant;
+  const y = ((firstLine.c * secondLine.a) - (firstLine.a * secondLine.c)) / determinant;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return null;
+  }
+
+  return { x, y };
+};
+
+const buildIntersectionCorners = (
+  lineV: PolarLine,
+  lineH: PolarLine,
+  xValues: [number, number],
+): [Point, Point, Point, Point] => {
+  const horizontalPoints = findPointsOnLine(lineH, xValues);
+  const left = horizontalPoints[0].x < horizontalPoints[1].x
+    ? horizontalPoints[0]
+    : horizontalPoints[1];
+  const right = horizontalPoints[0].x < horizontalPoints[1].x
+    ? horizontalPoints[1]
+    : horizontalPoints[0];
+
+  const verticalPoints = findPointsOnLine(lineV, xValues);
+  const top = verticalPoints[0].y > verticalPoints[1].y
+    ? verticalPoints[0]
+    : verticalPoints[1];
+  const bottom = verticalPoints[0].y > verticalPoints[1].y
+    ? verticalPoints[1]
+    : verticalPoints[0];
+
+  return [top, right, bottom, left];
+};
+
+const interpolatePixelsAlongLine = (
+  start: Point,
+  end: Point,
+  width: number,
+): Array<[number, number]> => {
+  let x1 = start.x;
+  let y1 = start.y;
+  let x2 = end.x;
+  let y2 = end.y;
+
+  const pixels: Array<[number, number]> = [];
+  const steep = Math.abs(y2 - y1) > Math.abs(x2 - x1);
+
+  if (steep) {
+    [x1, y1] = [y1, x1];
+    [x2, y2] = [y2, x2];
+  }
+
+  if (x1 > x2) {
+    [x1, x2] = [x2, x1];
+    [y1, y2] = [y2, y1];
+  }
+
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const gradient = dx === 0 ? 0 : dy / dx;
+
+  let xEnd = Math.round(x1);
+  let yEnd = y1 + (gradient * (xEnd - x1));
+  const xStartPixel = xEnd;
+  const yStartPixel = Math.round(yEnd);
+
+  if (steep) {
+    pixels.push([yStartPixel, xStartPixel], [yStartPixel + 1, xStartPixel]);
+  } else {
+    pixels.push([xStartPixel, yStartPixel], [xStartPixel, yStartPixel + 1]);
+  }
+
+  let interpolatedY = yEnd + gradient;
+
+  xEnd = Math.round(x2);
+  yEnd = y2 + (gradient * (xEnd - x2));
+  const xEndPixel = xEnd;
+  const yEndPixel = Math.round(yEnd);
+
+  for (let x = xStartPixel + 1; x < xEndPixel; x += 1) {
+    if (steep) {
+      for (let offset = 1 - width; offset <= width; offset += 1) {
+        pixels.push([Math.floor(interpolatedY) + offset, x]);
+      }
+    } else {
+      for (let offset = 1 - width; offset <= width; offset += 1) {
+        pixels.push([x, Math.floor(interpolatedY) + offset]);
+      }
+    }
+
+    interpolatedY += gradient;
+  }
+
+  if (steep) {
+    pixels.push([yEndPixel, xEndPixel], [yEndPixel + 1, xEndPixel]);
+  } else {
+    pixels.push([xEndPixel, yEndPixel], [xEndPixel, yEndPixel + 1]);
+  }
+
+  return pixels.map(([x, y]) => [Math.trunc(x), Math.trunc(y)]);
+};
+
+const computeConnectivity = (
+  point: Point,
+  corners: [Point, Point, Point, Point],
+  connectivityMask: ImageMaskMat,
+): [number, number, number, number] => {
+  const hits = [0, 0, 0, 0];
+  const lengths = [0, 0, 0, 0];
+  const data = connectivityMask.data;
+  const rowStride = connectivityMask.cols;
+
+  corners.forEach((corner, index) => {
+    const distance = Math.hypot(corner.x - point.x, corner.y - point.y);
+    if (distance === 0) {
+      return;
+    }
+
+    const ratio = INTERSECTION_ALONG_LENGTH / distance;
+    const endPoint: Point = {
+      x: Math.round(((1 - ratio) * point.x) + (ratio * corner.x)),
+      y: Math.round(((1 - ratio) * point.y) + (ratio * corner.y)),
+    };
+    const pixels = interpolatePixelsAlongLine(point, endPoint, INTERSECTION_SAMPLE_WIDTH);
+
+    for (const [x, y] of pixels) {
+      if (x < 0 || y < 0 || x >= connectivityMask.cols || y >= connectivityMask.rows) {
+        continue;
+      }
+
+      if (data[(y * rowStride) + x] > 0) {
+        hits[index] += 1;
+      }
+      lengths[index] += 1;
+    }
+  });
+
+  return hits.map((hitCount, index) => {
+    const length = lengths[index];
+    return length === 0 ? Number.NaN : hitCount / length;
+  }) as [number, number, number, number];
+};
+
+const computeOrientation = (
+  connectivity: [number, number, number, number],
+): [number, number, number, number] => {
+  const pairs: Array<[number, number]> = [
+    [0, 1],
+    [0, 3],
+    [2, 3],
+    [2, 1],
+  ];
+
+  return pairs.map(([firstIndex, secondIndex]) => {
+    const first = connectivity[firstIndex];
+    const second = connectivity[secondIndex];
+    const sum = first + second;
+    return sum !== 0 ? (2 * (first * second)) / sum : 0;
+  }) as [number, number, number, number];
+};
+
+const buildIntersections = (
+  verticalLines: PolarLine[],
+  horizontalLines: PolarLine[],
+  connectivityMask: ImageMaskMat,
+): IntersectionCandidate[] => {
+  const xValues: [number, number] = [0, connectivityMask.cols];
+  const intersections: IntersectionCandidate[] = [];
+
+  for (const lineV of verticalLines) {
+    for (const lineH of horizontalLines) {
+      const horizontalPoints = findPointsOnLine(lineH, xValues);
+      const verticalPoints = findPointsOnLine(lineV, xValues);
+      const point = intersectCartesianLines(
+        pointsToGeneralLine(horizontalPoints[0], horizontalPoints[1]),
+        pointsToGeneralLine(verticalPoints[0], verticalPoints[1]),
+      );
+
+      if (!point) {
+        continue;
+      }
+
+      const corners = buildIntersectionCorners(lineV, lineH, xValues);
+      const connectivity = computeConnectivity(point, corners, connectivityMask);
+      const orientation = computeOrientation(connectivity);
+
+      intersections.push({
+        point,
+        lineV,
+        lineH,
+        corners,
+        connectivity,
+        orientation,
+      });
+    }
+  }
+
+  return intersections;
+};
+
+const computeFrameArea = (
+  topLeft: IntersectionCandidate,
+  topRight: IntersectionCandidate,
+  bottomLeft: IntersectionCandidate,
+): number => {
+  const height = Math.abs(topLeft.point.y - bottomLeft.point.y);
+  const width = Math.abs(topLeft.point.x - topRight.point.x);
+  const angle = Math.abs(topLeft.lineH.phi - topLeft.lineV.phi);
+  return height * width * Math.sin(angle);
+};
+
+const computeFrameScore = (
+  topLeft: IntersectionCandidate,
+  topRight: IntersectionCandidate,
+  bottomRight: IntersectionCandidate,
+  bottomLeft: IntersectionCandidate,
+  imageShape: { width: number; height: number },
+): number | null => {
+  const area = computeFrameArea(topLeft, topRight, bottomLeft);
+  const totalArea = imageShape.width * imageShape.height;
+  const relativeArea = area / totalArea;
+  if (!Number.isFinite(relativeArea) || relativeArea <= FRAME_AREA_THRESHOLD) {
+    return null;
+  }
+
+  const score = (
+    (topLeft.orientation[0] * relativeArea)
+    + (topRight.orientation[1] * relativeArea)
+    + (bottomRight.orientation[2] * relativeArea)
+    + (bottomLeft.orientation[3] * relativeArea)
   );
+
+  return Number.isFinite(score) ? score : null;
+};
+
+const buildBestFrameCandidate = (
+  intersections: IntersectionCandidate[],
+  imageShape: { width: number; height: number },
+): FrameCandidate | null => {
+  const corners = {
+    topLeft: intersections.filter((intersection) => intersection.orientation[0] > ORIENTATION_SCORE_THRESHOLD),
+    topRight: intersections.filter((intersection) => intersection.orientation[1] > ORIENTATION_SCORE_THRESHOLD),
+    bottomRight: intersections.filter((intersection) => intersection.orientation[2] > ORIENTATION_SCORE_THRESHOLD),
+    bottomLeft: intersections.filter((intersection) => intersection.orientation[3] > ORIENTATION_SCORE_THRESHOLD),
+  };
+
+  let bestFrame: FrameCandidate | null = null;
+
+  for (const topLeft of corners.topLeft) {
+    const bottomLeftCandidates = corners.bottomLeft.filter((candidate) => {
+      return candidate !== topLeft && candidate.lineV.id === topLeft.lineV.id;
+    });
+    const topRightCandidates = corners.topRight.filter((candidate) => {
+      return candidate !== topLeft && candidate.lineH.id === topLeft.lineH.id;
+    });
+
+    for (const bottomRight of corners.bottomRight) {
+      if (bottomRight === topLeft) {
+        continue;
+      }
+
+      for (const topRight of topRightCandidates) {
+        for (const bottomLeft of bottomLeftCandidates) {
+          if (
+            bottomRight.lineV.id !== topRight.lineV.id
+            || bottomRight.lineH.id !== bottomLeft.lineH.id
+          ) {
+            continue;
+          }
+
+          const score = computeFrameScore(
+            topLeft,
+            topRight,
+            bottomRight,
+            bottomLeft,
+            imageShape,
+          );
+          if (score === null) {
+            continue;
+          }
+
+          if (!bestFrame || score > bestFrame.score) {
+            bestFrame = {
+              points: [
+                topLeft.point,
+                topRight.point,
+                bottomRight.point,
+                bottomLeft.point,
+              ],
+              score,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  return bestFrame;
+};
+
+const scalePointsToSourceFrame = (
+  points: [Point, Point, Point, Point],
+  sourceWidth: number,
+  sourceHeight: number,
+  scaleX: number,
+  scaleY: number,
+): Point[] => {
+  return points.map((point) => {
+    return {
+      x: clamp(point.x * scaleX, 0, sourceWidth - 1),
+      y: clamp(point.y * scaleY, 0, sourceHeight - 1),
+    };
+  });
+};
+
+const detectOnChannel = (
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  cv: any,
+  channel: ImageMaskMat,
+): [Point, Point, Point, Point] | null => {
+  let prepared: ImageMaskMat | null = null;
+  let masks: { houghMask: ImageMaskMat; connectivityMask: ImageMaskMat } | null = null;
+
+  try {
+    prepared = buildPreparedChannel(cv, channel);
+    masks = buildContourMasks(cv, prepared);
+    const lines = collectLinesFromHoughSpace(masks.houghMask);
+    const intersections = buildIntersections(
+      lines.vertical,
+      lines.horizontal,
+      masks.connectivityMask,
+    );
+    return buildBestFrameCandidate(intersections, {
+      width: prepared.cols,
+      height: prepared.rows,
+    })?.points ?? null;
+  } finally {
+    prepared?.delete();
+    masks?.houghMask.delete();
+    masks?.connectivityMask.delete();
+  }
 };
 
 /**
- * Detects the largest quadrilateral (document boundaries) in a given image.
- * Uses OpenCV.js for edge detection and contour approximation.
- *
- * @param imageData The source image data from the camera frame.
- * @returns An array of 4 Points representing the document corners, or null if none found.
+ * Detects document boundaries in a preview frame by mirroring the reference
+ * scanner pipeline: HSV split -> value channel -> saturation channel ->
+ * median blur -> equalize -> morphology -> contour mask -> custom Hough ->
+ * intersection scoring -> frame selection.
  */
 export const detectDocumentContour = (
   imageData: ImageData,
@@ -185,199 +717,82 @@ export const detectDocumentContour = (
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cv = (window as any).cv;
   if (!cv || !cv.Mat) {
-    return null; // OpenCV not loaded yet
+    return null;
   }
 
   const src = new cv.Mat(imageData.height, imageData.width, cv.CV_8UC4);
   src.data.set(imageData.data);
 
+  const targetSize = buildReferenceProcessingSize(imageData.width, imageData.height, options);
+  const needsResize = targetSize.width !== imageData.width || targetSize.height !== imageData.height;
   let working = src;
-  let resized: InstanceType<typeof cv.Mat> | null = null;
-  let scaleX = 1;
-  let scaleY = 1;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let resized: any | null = null;
+  const scaleX = imageData.width / targetSize.width;
+  const scaleY = imageData.height / targetSize.height;
 
-  const hasMaxWidth = typeof options.maxWidth === "number" && Number.isFinite(options.maxWidth);
-  const hasMaxHeight = typeof options.maxHeight === "number" && Number.isFinite(options.maxHeight);
-  const maxWidth = hasMaxWidth ? Math.max(1, Math.floor(options.maxWidth as number)) : imageData.width;
-  const maxHeight = hasMaxHeight ? Math.max(1, Math.floor(options.maxHeight as number)) : imageData.height;
-  const resizeScale = Math.min(
-    1,
-    maxWidth / Math.max(1, imageData.width),
-    maxHeight / Math.max(1, imageData.height),
-  );
-
-  if (resizeScale < 1) {
-    const targetWidth = Math.max(1, Math.round(imageData.width * resizeScale));
-    const targetHeight = Math.max(1, Math.round(imageData.height * resizeScale));
+  if (needsResize) {
     resized = new cv.Mat();
     cv.resize(
       src,
       resized,
-      new cv.Size(targetWidth, targetHeight),
+      new cv.Size(targetSize.width, targetSize.height),
       0,
       0,
       cv.INTER_AREA,
     );
     working = resized;
-    scaleX = imageData.width / targetWidth;
-    scaleY = imageData.height / targetHeight;
   }
 
-  const gray = new cv.Mat();
-  const blur = new cv.Mat();
-  const edges = new cv.Mat();
-  const closedEdges = new cv.Mat();
-  const contours = new cv.MatVector();
-  const hierarchy = new cv.Mat();
-  const closeKernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
-  const dilateKernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
-
-  let finalPoints: Point[] | null = null;
-  let bestScore = Number.NEGATIVE_INFINITY;
+  const rgb = new cv.Mat();
+  const hsv = new cv.Mat();
+  const hsvChannels = new cv.MatVector();
+  let saturation: ImageMaskMat | null = null;
+  let value: ImageMaskMat | null = null;
 
   try {
-    // 1. Grayscale
-    cv.cvtColor(working, gray, cv.COLOR_RGBA2GRAY);
+    cv.cvtColor(working, rgb, cv.COLOR_RGBA2RGB);
+    cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV);
+    cv.split(hsv, hsvChannels);
 
-    // 2. Gaussian Blur to reduce noise
-    cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+    const saturationChannel = hsvChannels.get(1) as ImageMaskMat;
+    const valueChannel = hsvChannels.get(2) as ImageMaskMat;
+    saturation = saturationChannel;
+    value = valueChannel;
 
-    // 3. Detect edges directly from the blurred grayscale image.
-    cv.Canny(blur, edges, 75, 200);
-
-    // 4. Reconnect fragmented borders before contour extraction.
-    cv.dilate(edges, edges, dilateKernel);
-    cv.morphologyEx(edges, closedEdges, cv.MORPH_CLOSE, closeKernel);
-
-    // 5. Find Contours
-    cv.findContours(
-      closedEdges,
-      contours,
-      hierarchy,
-      cv.RETR_LIST,
-      cv.CHAIN_APPROX_SIMPLE
-    );
-
-    const minArea = working.cols * working.rows * CONTOUR_AREA_MIN_RATIO;
-    const maxArea = working.cols * working.rows * CONTOUR_AREA_MAX_RATIO;
-
-    // 6. Find the largest contour that can be approximated to a 4-point polygon.
-    const numContours = contours.size();
-    const sortedContours: Array<{ index: number; area: number }> = [];
-    for (let i = 0; i < numContours; i++) {
-      const contour = contours.get(i);
-      const area = cv.contourArea(contour);
-      contour.delete();
-
-      if (area < minArea || area > maxArea) {
-        continue;
-      }
-
-      sortedContours.push({ index: i, area });
+    const valueFrame = detectOnChannel(cv, valueChannel);
+    if (valueFrame) {
+      return scalePointsToSourceFrame(
+        valueFrame,
+        imageData.width,
+        imageData.height,
+        scaleX,
+        scaleY,
+      );
     }
 
-    // Sort by area descending.
-    sortedContours.sort((a, b) => b.area - a.area);
-
-    // Check top contours.
-    for (let i = 0; i < Math.min(MAX_SCORING_CONTOURS, sortedContours.length); i++) {
-      const contour = contours.get(sortedContours[i].index);
-      const perimeter = cv.arcLength(contour, true);
-      const contourArea = sortedContours[i].area;
-
-      for (const epsilonFactor of APPROXIMATION_EPSILON_FACTORS) {
-        const approx = new cv.Mat();
-
-        try {
-          cv.approxPolyDP(contour, approx, epsilonFactor * perimeter, true);
-
-          if (approx.rows === 4 && cv.isContourConvex(approx)) {
-            const candidatePoints: Point[] = [];
-            for (let j = 0; j < 4; j++) {
-              candidatePoints.push({
-                x: Math.round(approx.data32S[j * 2] * scaleX),
-                y: Math.round(approx.data32S[j * 2 + 1] * scaleY),
-              });
-            }
-            const orderedCandidatePoints = orderPoints(candidatePoints);
-            const candidateScore = computeQuadScore(
-              orderedCandidatePoints,
-              contourArea * scaleX * scaleY,
-              imageData.width,
-              imageData.height,
-            );
-
-            if (candidateScore > bestScore) {
-              bestScore = candidateScore;
-              finalPoints = orderedCandidatePoints;
-            }
-          }
-        } finally {
-          approx.delete();
-        }
-      }
-
-      contour.delete();
+    const saturationFrame = detectOnChannel(cv, saturationChannel);
+    if (saturationFrame) {
+      return scalePointsToSourceFrame(
+        saturationFrame,
+        imageData.width,
+        imageData.height,
+        scaleX,
+        scaleY,
+      );
     }
 
+    return null;
   } catch (error) {
-    console.error("[Scanner] Document detection error: ", error);
+    console.error("[Scanner] Document detection error:", error);
+    return null;
   } finally {
-    // Cleanup memory
     src.delete();
     resized?.delete();
-    gray.delete();
-    blur.delete();
-    edges.delete();
-    closedEdges.delete();
-    contours.delete();
-    hierarchy.delete();
-    closeKernel.delete();
-    dilateKernel.delete();
+    rgb.delete();
+    hsv.delete();
+    hsvChannels.delete();
+    saturation?.delete();
+    value?.delete();
   }
-
-  if (!finalPoints || bestScore < MIN_ACCEPTABLE_QUAD_SCORE) {
-    return null;
-  }
-
-  return finalPoints;
-};
-
-/**
- * Orders points consistently: Top-Left, Top-Right, Bottom-Right, Bottom-Left
- */
-const orderPoints = (pts: Point[]): Point[] => {
-  if (pts.length !== 4) {
-    return pts;
-  }
-
-  const center = pts.reduce((accumulator, point) => {
-    return {
-      x: accumulator.x + point.x,
-      y: accumulator.y + point.y,
-    };
-  }, { x: 0, y: 0 });
-
-  center.x /= pts.length;
-  center.y /= pts.length;
-
-  const sortedByAngle = [...pts].sort((left, right) => {
-    const leftAngle = Math.atan2(left.y - center.y, left.x - center.x);
-    const rightAngle = Math.atan2(right.y - center.y, right.x - center.x);
-    return leftAngle - rightAngle;
-  });
-
-  const topLeftIndex = sortedByAngle.reduce((bestIndex, point, index, values) => {
-    const bestPoint = values[bestIndex];
-    return (point.x + point.y) < (bestPoint.x + bestPoint.y) ? index : bestIndex;
-  }, 0);
-
-  let ordered = rotateLeft(sortedByAngle, topLeftIndex);
-
-  // Ensure the second point is the top-right corner instead of the bottom-left corner.
-  if (ordered[1].y > ordered[3].y) {
-    ordered = [ordered[0], ordered[3], ordered[2], ordered[1]];
-  }
-
-  return ordered;
 };

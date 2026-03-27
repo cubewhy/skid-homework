@@ -269,12 +269,16 @@ export function ScannerPreviewDebugCard() {
             }
           />
           <MetricItem
-            label={t("debug.metrics.ipc")}
-            value={formatNumber(previewDebug.ipcMs, 1, " ms")}
+            label={t("debug.metrics.poll-wait")}
+            value={formatNumber(previewDebug.pollWaitMs, 1, " ms")}
           />
           <MetricItem
-            label={t("debug.metrics.frame-decode")}
-            value={formatNumber(previewDebug.frameDecodeMs, 1, " ms")}
+            label={t("debug.metrics.js-decode")}
+            value={formatNumber(previewDebug.jsDecodeMs, 1, " ms")}
+          />
+          <MetricItem
+            label={t("debug.metrics.canvas-draw")}
+            value={formatNumber(previewDebug.canvasDrawMs, 1, " ms")}
           />
           <MetricItem
             label={t("debug.metrics.last-update")}

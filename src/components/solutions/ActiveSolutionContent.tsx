@@ -1,25 +1,21 @@
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "../ui/collapsible";
-import { Button } from "../ui/button";
-import { Separator } from "../ui/separator";
-import { type KeyboardEvent, useCallback, useMemo } from "react";
-import { useProblemsStore } from "@/store/problems-store";
-import { useAiStore } from "@/store/ai-store";
+import {Collapsible, CollapsibleContent, CollapsibleTrigger,} from "../ui/collapsible";
+import {Button} from "../ui/button";
+import {Separator} from "../ui/separator";
+import {type KeyboardEvent, useCallback, useMemo} from "react";
+import {useProblemsStore} from "@/store/problems-store";
+import {useAiStore} from "@/store/ai-store";
 import ProblemList from "./ProblemList";
 import SolutionViewer from "./SolutionViewer";
-import type { ImproveResponse } from "@/ai/response";
-import { PhotoProvider, PhotoView } from "react-photo-view";
+import type {ImproveResponse} from "@/ai/response";
+import {PhotoProvider, PhotoView} from "react-photo-view";
 import StreamingOutputDisplay from "./StreamingOutputDisplay";
-import { useTranslation } from "react-i18next";
-import { useMediaQuery } from "@/hooks/use-media-query";
-import { useDrag } from "@use-gesture/react";
-import { animated, to, useSpring } from "@react-spring/web";
-import { OrderedSolution } from "@/hooks/use-solution-export";
-import { isTextMimeType } from "@/utils/file-utils";
-import { TextSolutionPreview } from "@/components/solutions/TextSolutionPreview.tsx";
+import {useTranslation} from "react-i18next";
+import {useMediaQuery} from "@/hooks/use-media-query";
+import {useDrag} from "@use-gesture/react";
+import {animated, to, useSpring} from "@react-spring/web";
+import {OrderedSolution} from "@/hooks/use-solution-export";
+import {isTextMimeType} from "@/utils/file-utils";
+import {TextSolutionPreview} from "@/components/solutions/TextSolutionPreview";
 
 export type ActiveSolutionContentProps = {
   ref?: React.Ref<HTMLDivElement>;

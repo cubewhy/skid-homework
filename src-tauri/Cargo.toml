@@ -15,6 +15,11 @@ default-run = "skid-homework"
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[profile.dev]
+incremental = true
+opt-level = 3
+debug = 0
+
 [build-dependencies]
 tauri-build = { version = "2.5.6", features = [] }
 
@@ -28,7 +33,7 @@ tauri-plugin-opener = "2"
 # H.264 stream decoding and transport
 openh264 = "0.9"
 base64 = "0.22"
-tokio = { version = "1", features = ["net", "io-util", "sync", "macros", "rt"] }
+tokio = { version = "1", features = ["net", "io-util", "sync", "macros", "rt", "time"] }
 
 # Optimize all dependencies even in dev builds.
 # Without this, CPU-heavy crates like openh264 run ~50x slower

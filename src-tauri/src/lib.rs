@@ -10,6 +10,7 @@ pub fn run() {
       adb_plugin::tauri_adb_pair,
       adb_plugin::tauri_adb_connect,
       adb_plugin::tauri_adb_screenshot,
+      adb_plugin::tauri_adb_capture_still,
       adb_plugin::tauri_adb_shell,
       adb_plugin::tauri_adb_push,
       adb_plugin::tauri_adb_forward,
@@ -18,7 +19,6 @@ pub fn run() {
       adb_plugin::tauri_adb_stop_server,
       stream_decoder::tauri_scanner_start_stream,
       stream_decoder::tauri_scanner_stop_stream,
-      stream_decoder::tauri_scanner_get_frame,
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {

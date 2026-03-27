@@ -1,26 +1,29 @@
 package com.skidhomework.server;
 
 import android.annotation.SuppressLint;
-import android.annotation.TargetApi;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
-import android.content.AttributionSource;
-import android.content.Context;
-import android.content.ContextWrapper;
+import android.hardware.camera2.CaptureFailure;
+import android.graphics.ImageFormat;
+import android.media.Image;
+import android.media.ImageReader;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.SystemClock;
 import android.util.Range;
+import android.util.Size;
 import android.view.Surface;
 
-import java.util.Collections;
+import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
@@ -30,55 +33,13 @@ import java.util.function.Consumer;
  * camera permissions are bypassed (same approach as scrcpy).
  */
 public final class CameraCapture {
-
-    private static class FakeContext extends ContextWrapper {
-        public static final String PACKAGE_NAME = "com.android.shell";
-
-        public FakeContext(Context base) {
-            super(base);
-        }
-
-        @Override
-        public String getPackageName() {
-            return PACKAGE_NAME;
-        }
-
-        @Override
-        public String getOpPackageName() {
-            return PACKAGE_NAME;
-        }
-
-        @Override
-        public Context getApplicationContext() {
-            return this;
-        }
-
-        @TargetApi(31) 
-        @Override
-        public AttributionSource getAttributionSource() {
-            // Spoof UID 2000 for Android 16+ permission checks
-            AttributionSource.Builder builder = new AttributionSource.Builder(2000); 
-            builder.setPackageName(PACKAGE_NAME);
-            return builder.build();
-        }
-
-        @Override
-        public Object getSystemService(String name) {
-            // Fixes Android 16 Camera Permission Denial (Issue identical to scrcpy #6523).
-            // CameraManager attempts to fetch ACTIVITY_SERVICE to check app tasks for rotation overrides.
-            // Returning null prevents the ActivityTaskManager from asserting the shell UID against the package name.
-            if (Context.ACTIVITY_SERVICE.equals(name)) {
-                return null;
-            }
-            return super.getSystemService(name);
-        }
-    }
-
     private static final int CAMERA_OPEN_TIMEOUT_SECONDS = 5;
     private static final int MAX_INTERNAL_CAMERA_RECOVERY_ATTEMPTS = 4;
     private static final long CAMERA_RECOVERY_DELAY_BASE_MS = 150L;
     private static final long CAMERA_RECOVERY_DELAY_MAX_MS = 1_000L;
     private static final long FIRST_CAPTURE_START_TIMEOUT_MS = 1_500L;
+    private static final long STILL_CAPTURE_TIMEOUT_MS = 4_000L;
+    private static final byte JPEG_QUALITY = (byte) 95;
 
     private final String cameraId;
     private final int width;
@@ -94,11 +55,14 @@ public final class CameraCapture {
     private final AtomicBoolean stopReported = new AtomicBoolean(false);
     private final AtomicBoolean startCompleted = new AtomicBoolean(false);
     private final Object cameraLock = new Object();
+    private final Object stillCaptureLock = new Object();
 
     private CameraDevice cameraDevice;
     private CameraCaptureSession captureSession;
     private CameraManager cameraManager;
     private CameraCharacteristics cameraCharacteristics;
+    private ImageReader stillImageReader;
+    private Size stillCaptureSize;
 
     public CameraCapture(
             String cameraId,
@@ -131,27 +95,132 @@ public final class CameraCapture {
         disconnectReported.set(false);
     }
 
+    /**
+     * Capture a single high-resolution JPEG from the active camera session.
+     */
+    public byte[] captureStillJpeg() throws Exception {
+        synchronized (stillCaptureLock) {
+            if (stopping.get()) {
+                throw new IllegalStateException("Camera pipeline is stopping.");
+            }
+
+            final CameraDevice activeCamera;
+            final CameraCaptureSession activeSession;
+            final ImageReader activeReader;
+            synchronized (cameraLock) {
+                activeCamera = cameraDevice;
+                activeSession = captureSession;
+                activeReader = stillImageReader;
+            }
+
+            if (activeCamera == null || activeSession == null || activeReader == null) {
+                throw new IllegalStateException("Camera still capture is not ready.");
+            }
+
+            clearPendingStillImage(activeReader);
+
+            final CountDownLatch imageLatch = new CountDownLatch(1);
+            final AtomicReference<byte[]> imageBytesRef = new AtomicReference<>();
+            final AtomicReference<String> failureMessageRef = new AtomicReference<>();
+
+            activeReader.setOnImageAvailableListener(
+                    (reader) -> {
+                        Image image = null;
+                        try {
+                            image = reader.acquireLatestImage();
+                            if (image == null) {
+                                return;
+                            }
+
+                            ByteBuffer buffer = image.getPlanes()[0].getBuffer();
+                            byte[] bytes = new byte[buffer.remaining()];
+                            buffer.get(bytes);
+                            imageBytesRef.compareAndSet(null, bytes);
+                            imageLatch.countDown();
+                        } catch (RuntimeException e) {
+                            failureMessageRef.compareAndSet(
+                                    null,
+                                    "Failed to read still image: " + sanitizeExceptionMessage(e)
+                            );
+                            imageLatch.countDown();
+                        } finally {
+                            if (image != null) {
+                                image.close();
+                            }
+                        }
+                    },
+                    handler
+            );
+
+            CaptureRequest.Builder requestBuilder =
+                    activeCamera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
+            requestBuilder.addTarget(activeReader.getSurface());
+            requestBuilder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO);
+            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+            requestBuilder.set(
+                    CaptureRequest.CONTROL_AF_MODE,
+                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+            );
+            requestBuilder.set(CaptureRequest.JPEG_QUALITY, JPEG_QUALITY);
+            requestBuilder.set(CaptureRequest.JPEG_ORIENTATION, 0);
+
+            try {
+                activeSession.capture(
+                        requestBuilder.build(),
+                        new CameraCaptureSession.CaptureCallback() {
+                            @Override
+                            public void onCaptureFailed(
+                                    CameraCaptureSession session,
+                                    CaptureRequest request,
+                                    CaptureFailure failure
+                            ) {
+                                failureMessageRef.compareAndSet(
+                                        null,
+                                        "Still capture request failed: reason=" + failure.getReason()
+                                );
+                                imageLatch.countDown();
+                            }
+                        },
+                        handler
+                );
+            } catch (CameraAccessException | IllegalStateException e) {
+                activeReader.setOnImageAvailableListener(null, null);
+                throw new RuntimeException(
+                        "failed to submit still capture request: " + sanitizeExceptionMessage(e),
+                        e
+                );
+            }
+
+            boolean imageArrived = imageLatch.await(STILL_CAPTURE_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            activeReader.setOnImageAvailableListener(null, null);
+
+            if (!imageArrived) {
+                throw new RuntimeException(
+                        "still capture timed out after " + STILL_CAPTURE_TIMEOUT_MS + "ms"
+                );
+            }
+
+            String failureMessage = failureMessageRef.get();
+            if (failureMessage != null) {
+                throw new RuntimeException(failureMessage);
+            }
+
+            byte[] imageBytes = imageBytesRef.get();
+            if (imageBytes == null || imageBytes.length == 0) {
+                throw new RuntimeException("still capture returned no image bytes");
+            }
+
+            return imageBytes;
+        }
+    }
+
     private void ensureCameraManager() throws Exception {
         if (cameraManager != null && cameraCharacteristics != null) {
             return;
         }
 
         try {
-            Class<?> activityThreadClass = Class.forName("android.app.ActivityThread");
-            Object activityThread = activityThreadClass.getMethod("systemMain").invoke(null);
-            Context systemContext = (Context) activityThreadClass
-                    .getMethod("getSystemContext").invoke(activityThread);
-
-            // Scrcpy Android 16 Fix: Wrap the system context dynamically to fake the package name
-            // and attribution source to match UID 2000 explicitly.
-            Context shellContext = new FakeContext(systemContext);
-            
-            // Critical Fix for Android 16: `getSystemService("camera")` returns a singleton tied to the
-            // original `systemContext`, ignoring our `FakeContext` wrapped methods. 
-            // We MUST instantiate CameraManager directly via reflection using our shellContext!
-            java.lang.reflect.Constructor<CameraManager> ctor = CameraManager.class.getDeclaredConstructor(Context.class);
-            ctor.setAccessible(true);
-            cameraManager = ctor.newInstance(shellContext);
+            cameraManager = CameraSupport.createShellCameraManager();
         } catch (Exception e) {
             throw new RuntimeException("Failed to obtain CameraManager system service.", e);
         }
@@ -216,6 +285,19 @@ public final class CameraCapture {
             throw new RuntimeException("failed to open camera " + cameraId);
         }
 
+        stillCaptureSize = CameraSupport.selectOutputSize(
+                cameraCharacteristics,
+                ImageFormat.JPEG,
+                width,
+                height
+        );
+        stillImageReader = ImageReader.newInstance(
+                stillCaptureSize.getWidth(),
+                stillCaptureSize.getHeight(),
+                ImageFormat.JPEG,
+                2
+        );
+
         System.out.println(
                 "[Camera] Opened camera "
                         + cameraId
@@ -223,13 +305,20 @@ public final class CameraCapture {
                         + (SystemClock.elapsedRealtime() - cameraOpenStartedAtMs)
                         + "ms."
         );
+        System.out.println(
+                "[Camera] Still capture output size: "
+                        + stillCaptureSize.getWidth()
+                        + "x"
+                        + stillCaptureSize.getHeight()
+                        + "."
+        );
 
-        // Create capture session targeting the encoder surface
+        // Create a shared session so preview streaming and still capture use the same camera pipeline.
         long sessionConfigureStartedAtMs = SystemClock.elapsedRealtime();
         CountDownLatch sessionLatch = new CountDownLatch(1);
 
         cameraDevice.createCaptureSession(
-                Collections.singletonList(encoderSurface),
+                Arrays.asList(encoderSurface, stillImageReader.getSurface()),
                 new CameraCaptureSession.StateCallback() {
                     @Override
                     public void onConfigured(CameraCaptureSession session) {
@@ -511,6 +600,7 @@ public final class CameraCapture {
     private void closeCurrentPipeline(CameraDevice callbackCamera) {
         synchronized (cameraLock) {
             closeCaptureSessionLocked();
+            closeStillImageReaderLocked();
             if (callbackCamera != null) {
                 closeCameraDeviceLocked(callbackCamera);
             } else if (cameraDevice != null) {
@@ -555,6 +645,21 @@ public final class CameraCapture {
         captureSession = null;
     }
 
+    private void closeStillImageReaderLocked() {
+        if (stillImageReader == null) {
+            return;
+        }
+
+        try {
+            stillImageReader.setOnImageAvailableListener(null, null);
+            stillImageReader.close();
+        } catch (RuntimeException e) {
+            // Ignore cleanup failures during teardown and recovery.
+        }
+        stillImageReader = null;
+        stillCaptureSize = null;
+    }
+
     private void closeCameraDeviceLocked(CameraDevice camera) {
         try {
             camera.close();
@@ -563,6 +668,21 @@ public final class CameraCapture {
         }
         if (cameraDevice == camera) {
             cameraDevice = null;
+        }
+    }
+
+    private void clearPendingStillImage(ImageReader reader) {
+        Image image = null;
+        try {
+            image = reader.acquireLatestImage();
+            while (image != null) {
+                image.close();
+                image = reader.acquireLatestImage();
+            }
+        } catch (RuntimeException e) {
+            if (image != null) {
+                image.close();
+            }
         }
     }
 

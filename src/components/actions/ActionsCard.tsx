@@ -1,20 +1,20 @@
 "use client";
 
-import type { FileItem } from "@/store/problems-store";
-import { useCallback } from "react";
+import type {FileItem} from "@/store/problems-store";
+import {useCallback} from "react";
 import ActionsArea from "./ActionsArea";
 import UploadFilesInfo from "./UploadFilesInfo";
-import { Button } from "../ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
-import { Separator } from "../ui/separator";
+import {Button} from "../ui/button";
+import {Card, CardContent, CardHeader, CardTitle} from "../ui/card";
+import {Separator} from "../ui/separator";
 import UploadArea from "./UploadArea";
-import { useRouter } from "next/navigation";
-import { useTranslation } from "react-i18next";
-import { cn } from "@/lib/utils";
-import { useShortcut } from "@/hooks/use-shortcut";
-import { ShortcutHint } from "../ShortcutHint";
-import { useSettingsStore } from "@/store/settings-store";
-import OnlineSearchToggle from "@/components/actions/OnlineSearchToggle.tsx";
+import {useRouter} from "next/navigation";
+import {useTranslation} from "react-i18next";
+import {cn} from "@/lib/utils";
+import {useShortcut} from "@/hooks/use-shortcut";
+import {ShortcutHint} from "../ShortcutHint";
+import {useSettingsStore} from "@/store/settings-store";
+import OnlineSearchToggle from "@/components/actions/OnlineSearchToggle";
 import ModelSelectorPopover from "./ModelSelectorPopover";
 
 export type ActionsCardProps = {

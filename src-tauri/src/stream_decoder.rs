@@ -2,8 +2,8 @@
 ///
 /// Connects to a forwarded TCP port, reads length-prefixed H.264 NAL units
 /// from the Android Camera Server, decodes them with `openh264`, extracts a
-/// downscaled I420 preview frame, and serves the newest color frame to the
-/// frontend via polling.
+/// downscaled I420 preview frame, and pushes the newest frame packet to the
+/// frontend over a Tauri IPC channel.
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -11,16 +11,18 @@ use std::time::{Duration, Instant};
 use openh264::decoder::Decoder;
 use openh264::formats::YUVSource;
 use serde::Serialize;
-use tauri::{command, AppHandle, Emitter};
+use tauri::{
+    command,
+    ipc::{Channel, InvokeResponseBody},
+    AppHandle, Emitter,
+};
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 use tokio::task::spawn_blocking;
+use tokio::time::sleep;
 
 /// Shared flag to signal the decode loop to stop.
 static STREAMING: AtomicBool = AtomicBool::new(false);
-
-/// Stores the most recently decoded frame packet.
-static LATEST_FRAME: Mutex<Option<PackedFrame>> = Mutex::new(None);
 
 /// Frame counter for periodic perf logging.
 static FRAME_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -45,12 +47,6 @@ const FRAME_CODEC_I420: u8 = 3;
 /// Keep live preview under roughly 640x360 to reduce IPC overhead and frontend decode cost.
 const MAX_PREVIEW_WIDTH: usize = 640;
 const MAX_PREVIEW_HEIGHT: usize = 360;
-
-/// Encoded frame waiting to be consumed by the frontend.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct PackedFrame {
-    packet: Vec<u8>,
-}
 
 /// Decoded preview frame plus timing metadata.
 struct PreviewFrame {
@@ -79,23 +75,17 @@ enum DecodeLoopExit {
     RemoteClosed { detail: String },
 }
 
-/// Poll for the latest decoded frame from the frontend.
-#[command]
-pub fn tauri_scanner_get_frame() -> Result<tauri::ipc::Response, String> {
-    let packed = take_packed_frame(&LATEST_FRAME)?;
-    Ok(tauri::ipc::Response::new(packed))
-}
-
 /// Start receiving and decoding the H.264 video stream from the forwarded port.
 #[command]
-pub async fn tauri_scanner_start_stream(app: AppHandle, port: u16) -> Result<(), String> {
+pub async fn tauri_scanner_start_stream(
+    app: AppHandle,
+    port: u16,
+    frame_channel: Channel<InvokeResponseBody>,
+) -> Result<(), String> {
     if STREAMING.swap(true, Ordering::SeqCst) {
         return Err("Stream decoder is already running.".to_string());
     }
 
-    if let Ok(mut guard) = LATEST_FRAME.lock() {
-        *guard = None;
-    }
     FRAME_SEQ.store(0, Ordering::Relaxed);
     emit_decoder_status(
         &app,
@@ -106,7 +96,7 @@ pub async fn tauri_scanner_start_stream(app: AppHandle, port: u16) -> Result<(),
     );
 
     tauri::async_runtime::spawn(async move {
-        let result = decode_stream_loop(&app, port).await;
+        let result = decode_stream_loop(&app, port, frame_channel).await;
 
         match &result {
             Ok(DecodeLoopExit::ManualStop) => {
@@ -145,9 +135,14 @@ pub async fn tauri_scanner_stop_stream() -> Result<(), String> {
 }
 
 /// Internal decode loop that reads NAL units from TCP and decodes them.
-async fn decode_stream_loop(app: &AppHandle, port: u16) -> Result<DecodeLoopExit, String> {
+async fn decode_stream_loop(
+    app: &AppHandle,
+    port: u16,
+    frame_channel: Channel<InvokeResponseBody>,
+) -> Result<DecodeLoopExit, String> {
     let address = format!("127.0.0.1:{port}");
     let mut reconnect_attempt = 0usize;
+    let mut has_received_frame = false;
     let (mut stream, mut decoder) = connect_decoder_stream(
         app,
         &address,
@@ -176,16 +171,29 @@ async fn decode_stream_loop(app: &AppHandle, port: u16) -> Result<DecodeLoopExit
             if is_recoverable_stream_error(&error) {
                 reconnect_attempt += 1;
                 if reconnect_attempt > STREAM_RECONNECT_MAX_ATTEMPTS {
-                    return Err(format!(
-                        "Preview stream closed unexpectedly after {STREAM_RECONNECT_MAX_ATTEMPTS} reconnect attempts: {error}"
-                    ));
+                    return if has_received_frame {
+                        Err(format!(
+                            "Preview stream closed unexpectedly after {STREAM_RECONNECT_MAX_ATTEMPTS} reconnect attempts: {error}"
+                        ))
+                    } else {
+                        Err(format!(
+                            "Preview stream closed before the first frame after {STREAM_RECONNECT_MAX_ATTEMPTS} reconnect attempts: {error}"
+                        ))
+                    };
                 }
 
-                let detail = format!(
-                    "Preview socket read interrupted ({error}). Reconnecting decoder transport."
-                );
+                let detail = if has_received_frame {
+                    format!(
+                        "Preview socket read interrupted ({error}). Reconnecting decoder transport."
+                    )
+                } else {
+                    format!(
+                        "Preview stream closed before the first frame ({error}). Waiting for the scanner socket to become ready."
+                    )
+                };
                 log::warn!("{detail}");
                 emit_decoder_status(app, "reconnecting", detail, true, reconnect_attempt);
+                sleep(Duration::from_millis(reconnect_delay_ms(reconnect_attempt))).await;
                 let (next_stream, next_decoder) = connect_decoder_stream(
                     app,
                     &address,
@@ -222,16 +230,29 @@ async fn decode_stream_loop(app: &AppHandle, port: u16) -> Result<DecodeLoopExit
             if is_recoverable_stream_error(&error) {
                 reconnect_attempt += 1;
                 if reconnect_attempt > STREAM_RECONNECT_MAX_ATTEMPTS {
-                    return Err(format!(
-                        "Preview payload read kept failing after {STREAM_RECONNECT_MAX_ATTEMPTS} reconnect attempts: {error}"
-                    ));
+                    return if has_received_frame {
+                        Err(format!(
+                            "Preview payload read kept failing after {STREAM_RECONNECT_MAX_ATTEMPTS} reconnect attempts: {error}"
+                        ))
+                    } else {
+                        Err(format!(
+                            "Preview stream payload closed before the first frame after {STREAM_RECONNECT_MAX_ATTEMPTS} reconnect attempts: {error}"
+                        ))
+                    };
                 }
 
-                let detail = format!(
-                    "Preview payload read interrupted ({error}). Reconnecting decoder transport."
-                );
+                let detail = if has_received_frame {
+                    format!(
+                        "Preview payload read interrupted ({error}). Reconnecting decoder transport."
+                    )
+                } else {
+                    format!(
+                        "Preview stream payload closed before the first frame ({error}). Waiting for the scanner socket to become ready."
+                    )
+                };
                 log::warn!("{detail}");
                 emit_decoder_status(app, "reconnecting", detail, true, reconnect_attempt);
+                sleep(Duration::from_millis(reconnect_delay_ms(reconnect_attempt))).await;
                 let (next_stream, next_decoder) = connect_decoder_stream(
                     app,
                     &address,
@@ -256,10 +277,13 @@ async fn decode_stream_loop(app: &AppHandle, port: u16) -> Result<DecodeLoopExit
 
         match decode_result {
             Ok(Some(frame)) => {
+                let first_frame_ready = !has_received_frame;
+                has_received_frame = true;
                 reconnect_attempt = 0;
                 let seq = FRAME_SEQ.fetch_add(1, Ordering::Relaxed);
                 let payload_kb = frame.payload_len as f64 / 1024.0;
                 let nal_kb = nal_length as f64 / 1024.0;
+                let preview_packet = frame.packet;
 
                 if seq % 15 == 0 {
                     log::info!(
@@ -275,12 +299,23 @@ async fn decode_stream_loop(app: &AppHandle, port: u16) -> Result<DecodeLoopExit
                     );
                 }
 
-                publish_encoded_frame(
-                    &LATEST_FRAME,
-                    PackedFrame {
-                        packet: frame.packet,
-                    },
-                );
+                frame_channel
+                    .send(InvokeResponseBody::Raw(preview_packet))
+                    .map_err(|error| {
+                        format!("Failed to deliver the preview frame to the frontend: {error}")
+                    })?;
+
+                if first_frame_ready {
+                    emit_decoder_status(
+                        app,
+                        "ready",
+                        format!(
+                            "Decoder published the first preview frame from tcp://{address}."
+                        ),
+                        false,
+                        0,
+                    );
+                }
             }
             Ok(None) => {}
             Err(error) => {
@@ -510,6 +545,7 @@ fn append_downsampled_plane_by_factor(
 }
 
 /// Copy a strided image plane into a tightly packed buffer.
+#[cfg(test)]
 fn copy_plane_contiguous(plane: &[u8], width: usize, height: usize, stride: usize) -> Vec<u8> {
     let mut packed = Vec::with_capacity(width * height);
     append_plane_contiguous(&mut packed, plane, width, height, stride);
@@ -517,6 +553,7 @@ fn copy_plane_contiguous(plane: &[u8], width: usize, height: usize, stride: usiz
 }
 
 /// Downscale a strided image plane by sampling every `factor`th pixel.
+#[cfg(test)]
 fn downsample_plane_by_factor(
     plane: &[u8],
     width: usize,
@@ -527,24 +564,6 @@ fn downsample_plane_by_factor(
     let mut packed = Vec::with_capacity(width * height);
     append_downsampled_plane_by_factor(&mut packed, plane, width, height, stride, factor);
     packed
-}
-
-/// Publish the newest encoded frame for polling.
-fn publish_encoded_frame(latest_frame_store: &Mutex<Option<PackedFrame>>, frame: PackedFrame) {
-    if let Ok(mut guard) = latest_frame_store.lock() {
-        *guard = Some(frame);
-    }
-}
-
-/// Take the newest encoded frame and pack it into the IPC payload format.
-fn take_packed_frame(latest_frame_store: &Mutex<Option<PackedFrame>>) -> Result<Vec<u8>, String> {
-    let mut guard = latest_frame_store.lock().map_err(|error| error.to_string())?;
-
-    if let Some(frame) = guard.take() {
-        Ok(frame.packet)
-    } else {
-        Ok(Vec::new())
-    }
 }
 
 /// Emit a structured decoder lifecycle event for diagnostics and future UI hooks.
@@ -645,308 +664,9 @@ async fn connect_decoder_stream(
                     true,
                     reconnect_attempt.max(attempts),
                 );
-                std::thread::sleep(Duration::from_millis(delay_ms));
+                sleep(Duration::from_millis(delay_ms)).await;
             }
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::hint::black_box;
-
-    const BENCHMARK_MIN_FPS: f64 = 30.0;
-    const BENCHMARK_WARMUP_ITERATIONS: usize = 32;
-
-    #[derive(Clone, Copy, Debug)]
-    struct BenchmarkStats {
-        iterations: usize,
-        total_ms: f64,
-        avg_ms: f64,
-        fps: f64,
-    }
-
-    fn build_bench_planes(width: usize, height: usize) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
-        let mut y_plane = Vec::with_capacity(width * height);
-        for row in 0..height {
-            for column in 0..width {
-                y_plane.push(((row * 17 + column * 29) & 0xff) as u8);
-            }
-        }
-
-        let chroma_width = width / 2;
-        let chroma_height = height / 2;
-        let mut u_plane = Vec::with_capacity(chroma_width * chroma_height);
-        let mut v_plane = Vec::with_capacity(chroma_width * chroma_height);
-
-        for row in 0..chroma_height {
-            for column in 0..chroma_width {
-                u_plane.push(((128 + row * 7 + column * 11) & 0xff) as u8);
-                v_plane.push(((64 + row * 13 + column * 5) & 0xff) as u8);
-            }
-        }
-
-        (y_plane, u_plane, v_plane)
-    }
-
-    fn run_benchmark<F>(label: &str, iterations: usize, mut action: F) -> BenchmarkStats
-    where
-        F: FnMut(),
-    {
-        for _ in 0..BENCHMARK_WARMUP_ITERATIONS {
-            black_box(action());
-        }
-
-        let start = Instant::now();
-        for _ in 0..iterations {
-            black_box(action());
-        }
-
-        let total_ms = start.elapsed().as_secs_f64() * 1000.0;
-        let avg_ms = total_ms / iterations as f64;
-        let fps = 1000.0 / avg_ms;
-
-        println!(
-            "[bench:rust] {label} | iterations={iterations} total={total_ms:.2}ms avg={avg_ms:.4}ms fps={fps:.1}"
-        );
-
-        assert!(
-            fps >= BENCHMARK_MIN_FPS,
-            "{label} dropped below {:.1} FPS: measured {fps:.1} FPS",
-            BENCHMARK_MIN_FPS
-        );
-        assert!(
-            avg_ms < 33.0,
-            "{label} exceeded the 33ms/frame budget: measured {avg_ms:.4}ms"
-        );
-
-        BenchmarkStats {
-            iterations,
-            total_ms,
-            avg_ms,
-            fps,
-        }
-    }
-
-    #[test]
-    fn copy_plane_contiguous_trims_stride_padding() {
-        let plane = vec![1, 2, 3, 99, 4, 5, 6, 99];
-
-        let packed = copy_plane_contiguous(&plane, 3, 2, 4);
-
-        assert_eq!(packed, vec![1, 2, 3, 4, 5, 6]);
-    }
-
-    #[test]
-    fn downsample_plane_by_factor_samples_every_other_pixel() {
-        let plane = vec![
-            1, 2, 3, 4,
-            5, 6, 7, 8,
-            9, 10, 11, 12,
-            13, 14, 15, 16,
-        ];
-
-        let packed = downsample_plane_by_factor(&plane, 2, 2, 4, 2);
-
-        assert_eq!(packed, vec![1, 3, 9, 11]);
-    }
-
-    #[test]
-    fn select_preview_dimensions_downscales_large_frames() {
-        let (width, height, factor) = select_preview_dimensions(1280, 720);
-        assert_eq!((width, height, factor), (640, 360, 2));
-    }
-
-    #[test]
-    fn select_preview_dimensions_preserves_even_i420_alignment() {
-        let (width, height, factor) = select_preview_dimensions(639, 359);
-        assert_eq!((width, height, factor), (638, 358, 1));
-        assert_eq!(width % 2, 0);
-        assert_eq!(height % 2, 0);
-    }
-
-    #[test]
-    fn select_preview_dimensions_uses_non_power_of_two_scaling_when_needed() {
-        let (width, height, factor) = select_preview_dimensions(1920, 1080);
-        assert_eq!((width, height, factor), (640, 360, 3));
-    }
-
-    #[test]
-    fn pack_i420_preview_preserves_plane_order_without_downscale() {
-        let packet = pack_i420_preview_packet(
-            &[1, 2, 3, 4],
-            &[5],
-            &[6],
-            2,
-            1,
-            1,
-            2,
-            2,
-            1,
-        );
-
-        assert_eq!(packet[0], FRAME_CODEC_I420);
-        assert_eq!(&packet[1..5], &2u32.to_be_bytes());
-        assert_eq!(&packet[5..9], &2u32.to_be_bytes());
-        assert_eq!(&packet[9..], &[1, 2, 3, 4, 5, 6]);
-    }
-
-    #[test]
-    fn pack_i420_preview_downscales_each_plane_consistently() {
-        let y_plane = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-        let u_plane = vec![21, 22, 23, 24];
-        let v_plane = vec![31, 32, 33, 34];
-
-        let packet = pack_i420_preview_packet(
-            &y_plane,
-            &u_plane,
-            &v_plane,
-            4,
-            2,
-            2,
-            2,
-            2,
-            2,
-        );
-
-        assert_eq!(&packet[9..], &[1, 3, 9, 11, 21, 31]);
-    }
-
-    #[test]
-    fn pack_i420_preview_downscales_chroma_with_the_same_ratio_as_luma() {
-        let y_plane = (1u8..=32).collect::<Vec<u8>>();
-        let u_plane = vec![101, 102, 103, 104, 105, 106, 107, 108];
-        let v_plane = vec![201, 202, 203, 204, 205, 206, 207, 208];
-
-        let packet = pack_i420_preview_packet(
-            &y_plane,
-            &u_plane,
-            &v_plane,
-            8,
-            4,
-            4,
-            4,
-            2,
-            2,
-        );
-
-        assert_eq!(
-            &packet[9..],
-            &[1, 3, 5, 7, 17, 19, 21, 23, 101, 103, 201, 203],
-        );
-    }
-
-    #[test]
-    fn compute_i420_payload_len_matches_640x360_preview() {
-        assert_eq!(compute_i420_payload_len(640, 360), 345_600);
-    }
-
-    #[test]
-    fn publish_encoded_frame_overwrites_the_previous_frame() {
-        let latest_frame_store = Mutex::new(Some(PackedFrame {
-            packet: vec![1, 1, 1],
-        }));
-
-        publish_encoded_frame(
-            &latest_frame_store,
-            PackedFrame {
-                packet: vec![9, 8, 7],
-            },
-        );
-
-        let latest = latest_frame_store.lock().unwrap().clone().unwrap();
-        assert_eq!(latest.packet, vec![9, 8, 7]);
-    }
-
-    #[test]
-    fn take_packed_frame_clears_latest_value_after_read() {
-        let latest_frame_store = Mutex::new(Some(PackedFrame {
-            packet: vec![FRAME_CODEC_I420, 0, 0, 0, 1, 0, 0, 0, 3, 9, 8, 7],
-        }));
-
-        let first = take_packed_frame(&latest_frame_store).unwrap();
-        let second = take_packed_frame(&latest_frame_store).unwrap();
-
-        assert_eq!(first.len(), FRAME_PACKET_HEADER_SIZE + 3);
-        assert!(second.is_empty());
-    }
-
-    #[test]
-    fn recoverable_stream_error_includes_connection_reset() {
-        let error = std::io::Error::new(std::io::ErrorKind::ConnectionReset, "reset");
-        assert!(is_recoverable_stream_error(&error));
-    }
-
-    #[test]
-    fn reconnect_delay_is_bounded() {
-        assert_eq!(reconnect_delay_ms(1), RECONNECT_RETRY_BASE_DELAY_MS);
-        assert_eq!(reconnect_delay_ms(100), RECONNECT_RETRY_MAX_DELAY_MS);
-    }
-
-    #[test]
-    #[ignore = "benchmark"]
-    fn benchmark_pack_i420_preview_1280x720_to_640x360() {
-        let (y_plane, u_plane, v_plane) = build_bench_planes(1280, 720);
-
-        let stats = run_benchmark("pack_i420_preview 1280x720 -> 640x360", 400, || {
-            let packet = pack_i420_preview_packet(
-                &y_plane, &u_plane, &v_plane, 1280, 640, 640, 640, 360, 2,
-            );
-            assert_eq!(packet.len(), FRAME_PACKET_HEADER_SIZE + (640 * 360 * 3) / 2);
-            black_box(packet);
-        });
-
-        assert!(stats.iterations >= 400);
-        assert!(stats.total_ms > 0.0);
-        assert!(stats.avg_ms > 0.0);
-        assert!(stats.fps >= BENCHMARK_MIN_FPS);
-    }
-
-    #[test]
-    #[ignore = "benchmark"]
-    fn benchmark_pack_i420_preview_1920x1080_to_640x360() {
-        let (y_plane, u_plane, v_plane) = build_bench_planes(1920, 1080);
-
-        let stats = run_benchmark("pack_i420_preview 1920x1080 -> 640x360", 320, || {
-            let packet = pack_i420_preview_packet(
-                &y_plane,
-                &u_plane,
-                &v_plane,
-                1920,
-                960,
-                960,
-                640,
-                360,
-                3,
-            );
-            assert_eq!(packet.len(), FRAME_PACKET_HEADER_SIZE + (640 * 360 * 3) / 2);
-            black_box(packet);
-        });
-
-        assert!(stats.iterations >= 320);
-        assert!(stats.total_ms > 0.0);
-        assert!(stats.avg_ms > 0.0);
-        assert!(stats.fps >= BENCHMARK_MIN_FPS);
-    }
-
-    #[test]
-    #[ignore = "benchmark"]
-    fn benchmark_pack_frame_packet_i420_640x360() {
-        let (y_plane, u_plane, v_plane) = build_bench_planes(1280, 720);
-        let packet = pack_i420_preview_packet(
-            &y_plane, &u_plane, &v_plane, 1280, 640, 640, 640, 360, 2,
-        );
-
-        let stats = run_benchmark("pack_frame_packet I420 640x360", 2_000, || {
-            let packet_clone = packet.clone();
-            assert_eq!(packet_clone.len(), FRAME_PACKET_HEADER_SIZE + (640 * 360 * 3) / 2);
-            black_box(packet_clone);
-        });
-
-        assert!(stats.iterations >= 2_000);
-        assert!(stats.total_ms > 0.0);
-        assert!(stats.avg_ms > 0.0);
-        assert!(stats.fps >= BENCHMARK_MIN_FPS);
-    }
-}

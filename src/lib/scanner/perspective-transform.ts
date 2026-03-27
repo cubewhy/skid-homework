@@ -8,6 +8,25 @@ function distance(p1: Point, p2: Point): number {
 }
 
 /**
+ * Orders corners using the same sum/diff rule as the reference scanner.
+ */
+function orderPoints(points: Point[]): Point[] {
+  if (points.length !== 4) {
+    return points;
+  }
+
+  const sums = points.map((point) => point.x + point.y);
+  const diffs = points.map((point) => point.y - point.x);
+
+  return [
+    points[sums.indexOf(Math.min(...sums))],
+    points[diffs.indexOf(Math.min(...diffs))],
+    points[sums.indexOf(Math.max(...sums))],
+    points[diffs.indexOf(Math.max(...diffs))],
+  ];
+}
+
+/**
  * Applies a perspective transformation to an ImageData object, warping it
  * so the 4 given corner points form a flat rectangle.
  *
@@ -32,7 +51,7 @@ export const applyPerspectiveTransform = async (
       return;
     }
 
-    const [tl, tr, br, bl] = corners;
+    const [tl, tr, br, bl] = orderPoints(corners);
 
     // Calculate the output width from the detected quadrilateral.
     const widthTop = distance(tl, tr);

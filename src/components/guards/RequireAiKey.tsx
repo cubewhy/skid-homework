@@ -1,7 +1,7 @@
 "use client";
-import { useEffect, useState, type PropsWithChildren } from "react";
-import { usePathname, useRouter } from "next/navigation";
-import { useHasActiveAiKey, useAiStore } from "@/store/ai-store";
+import {type PropsWithChildren, useEffect, useState} from "react";
+import {usePathname, useRouter} from "next/navigation";
+import {useAiStore, useHasActiveAiKey} from "@/store/ai-store";
 
 type RequireAiKeyProps = PropsWithChildren<{
   fallback: string;

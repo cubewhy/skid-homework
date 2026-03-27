@@ -1,22 +1,12 @@
-import type { FileItem } from "@/store/problems-store.ts";
-import { useEffect, useState } from "react";
-import { readTextFile } from "@/utils/file-utils.ts";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible.tsx";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog.tsx";
-import { Button } from "@/components/ui/button.tsx";
-import { Maximize2 } from "lucide-react";
-import type { TFunction } from "i18next";
-import CodeRenderer from "@/components/markdown/CodeRenderer.tsx";
+import type {FileItem} from "@/store/problems-store";
+import {useEffect, useState} from "react";
+import {readTextFile} from "@/utils/file-utils";
+import {Collapsible, CollapsibleContent, CollapsibleTrigger,} from "@/components/ui/collapsible";
+import {Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,} from "@/components/ui/dialog";
+import {Button} from "@/components/ui/button";
+import {Maximize2} from "lucide-react";
+import type {TFunction} from "i18next";
+import CodeRenderer from "@/components/markdown/CodeRenderer";
 
 export interface TextSolutionPreviewProps {
   item: FileItem;

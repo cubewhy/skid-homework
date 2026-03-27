@@ -7,19 +7,19 @@
  */
 
 import {
+  captureTauriAdbStill,
   forwardTauriAdbPort,
-  getTauriDecodedFrame,
   pushTauriAdbFile,
   removeForwardTauriAdbPort,
   startTauriAdbServer,
   startTauriDecodeStream,
   stopTauriAdbServer,
   stopTauriDecodeStream,
+  type TauriDecodeStreamHandle,
 } from "@/lib/tauri/adb";
 import {isTauri} from "@/lib/tauri/platform";
-import {type AdbScreenshotCapture, captureAdbScreenshotWithMetadata,} from "@/lib/webadb/screenshot";
 
-import {decodeFramePacketToRgba} from "./frame-codec.js";
+import {decodeFramePacketToRgba, FRAME_PACKET_HEADER_SIZE} from "./frame-codec";
 
 /** Callback type for receiving decoded preview frames. */
 export type FrameCallback = (frame: ImageData) => void;
@@ -122,9 +122,24 @@ export interface FrameSourceState {
   benchmark: FrameSourceBenchmarkSnapshot;
 }
 
-export interface ScannerStillCapture extends AdbScreenshotCapture {
+export interface ScannerStillCapture {
+  file: File;
+  width: number | null;
+  height: number | null;
+  capturedAt: number;
+  source: "tauri-camera-still";
+  serial: string;
   previewWidth: number | null;
   previewHeight: number | null;
+}
+
+type DecoderLifecycleState = "starting" | "connected" | "reconnecting" | "ready" | "error" | "stopped";
+
+interface DecoderLifecycleEvent {
+  state: DecoderLifecycleState;
+  detail: string;
+  recoverable: boolean;
+  reconnectAttempt: number;
 }
 
 /** Frame source lifecycle interface. */
@@ -174,18 +189,26 @@ export const DEFAULT_SCANNER_CONFIG: Omit<ScannerConfig, "serial" | "serverJarPa
 };
 
 const SERVER_MAIN_CLASS = "com.skidhomework.server.Server";
-const SERVER_STARTUP_DELAY_MS = 600;
+const STILL_CAPTURE_SOCKET_SUFFIX = "-still";
 const DECODE_RESTART_DELAY_MS = 125;
 const WATCHDOG_INTERVAL_MS = 1000;
 const STARTUP_FRAME_GRACE_MS = 9000;
-const MAX_EMPTY_POLL_DELAY_MS = 12;
+
+const getStillCaptureSocketName = (socketName: string): string => {
+  return `${socketName}${STILL_CAPTURE_SOCKET_SUFFIX}`;
+};
+
+const buildStillCaptureFile = (bytes: Uint8Array): File => {
+  const fileName = `camera_still_${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`;
+  const blobCompatibleBytes = new Uint8Array(bytes.byteLength);
+  blobCompatibleBytes.set(bytes);
+  return new File([blobCompatibleBytes], fileName, { type: "image/jpeg" });
+};
 const BENCHMARK_EMIT_INTERVAL_MS = 250;
 const BENCHMARK_WINDOW_SIZE = 240;
-const STEADY_STATE_FRAME_GAP_THRESHOLD_MS = 250;
 const INITIAL_RECONNECT_DELAY_MS = 250;
 const MAX_RECONNECT_DELAY_MS = 5000;
 const RECONNECT_BACKOFF_MULTIPLIER = 1.6;
-const FRAME_PACKET_HEADER_SIZE = 9;
 const DECODE_RESTART_MAX_ATTEMPTS = 2;
 const FORWARD_RESTART_MAX_ATTEMPTS = 3;
 const RECOVERY_EVENT_SUPPRESSION_MS = 2500;
@@ -213,6 +236,7 @@ const DEFAULT_CAPABILITIES: FrameSourceCapabilities = {
 
 interface BenchmarkAccumulator {
   startedAt: number | null;
+  firstFrameAt: number | null;
   totalFrames: number;
   totalPolls: number;
   totalEmptyPolls: number;
@@ -284,10 +308,6 @@ const computeRecentWindowFps = (
 
   for (let index = frameIntervalSamples.length - 1; index >= 0; index -= 1) {
     const sample = frameIntervalSamples[index];
-    if (sample > STEADY_STATE_FRAME_GAP_THRESHOLD_MS) {
-      break;
-    }
-
     accumulatedMs += sample;
     intervalCount += 1;
 
@@ -303,6 +323,168 @@ const computeRecentWindowFps = (
   return (intervalCount * 1000) / accumulatedMs;
 };
 
+const computeActiveStreamingFps = (
+  totalFrames: number,
+  firstFrameAt: number | null,
+  lastFrameAt: number | null,
+  totalReconnectDowntimeMs: number,
+): number => {
+  if (totalFrames <= 0 || firstFrameAt === null || lastFrameAt === null || lastFrameAt <= firstFrameAt) {
+    return 0;
+  }
+
+  const activeRuntimeMs = Math.max(0, (lastFrameAt - firstFrameAt) - totalReconnectDowntimeMs);
+  if (activeRuntimeMs <= 0) {
+    return 0;
+  }
+
+  return totalFrames / (activeRuntimeMs / 1000);
+};
+
+const computeSessionAverageFps = (
+  totalFrames: number,
+  startedAt: number | null,
+): number => {
+  if (totalFrames <= 0 || startedAt === null) {
+    return 0;
+  }
+
+  const runtimeMs = Math.max(0, nowMs() - startedAt);
+  if (runtimeMs <= 0) {
+    return 0;
+  }
+
+  return totalFrames / (runtimeMs / 1000);
+};
+
+const computeLatestFrameFps = (frameIntervalSamples: number[]): number => {
+  if (frameIntervalSamples.length === 0) {
+    return 0;
+  }
+
+  const latestIntervalMs = frameIntervalSamples[frameIntervalSamples.length - 1] ?? 0;
+  if (latestIntervalMs <= 0) {
+    return 0;
+  }
+
+  return 1000 / latestIntervalMs;
+};
+
+const clampMetric = (value: number): number => {
+  return Number.isFinite(value) && value > 0 ? value : 0;
+};
+
+const roundMetric = (value: number): number => {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.round(value * 10) / 10;
+};
+
+const resolveEffectiveFps = (benchmark: BenchmarkAccumulator): number => {
+  return roundMetric(
+    clampMetric(
+      computeActiveStreamingFps(
+        benchmark.totalFrames,
+        benchmark.firstFrameAt,
+        benchmark.lastFrameAt,
+        benchmark.totalReconnectDowntimeMs,
+      ),
+    ),
+  );
+};
+
+const resolveSessionAverageFps = (benchmark: BenchmarkAccumulator): number => {
+  return roundMetric(clampMetric(computeSessionAverageFps(benchmark.totalFrames, benchmark.startedAt)));
+};
+
+const resolveRecentWindowFps = (benchmark: BenchmarkAccumulator): number => {
+  return roundMetric(clampMetric(computeRecentWindowFps(benchmark.frameIntervalSamples, 3000)));
+};
+
+const resolvePreviewFps = (benchmark: BenchmarkAccumulator): number => {
+  return roundMetric(clampMetric(computeLatestFrameFps(benchmark.frameIntervalSamples)));
+};
+
+const computeBenchmarkRuntimeMs = (benchmark: BenchmarkAccumulator): number => {
+  return benchmark.startedAt === null
+    ? 0
+    : Math.max(0, nowMs() - benchmark.startedAt);
+};
+
+const getCurrentSnapshotMetrics = (benchmark: BenchmarkAccumulator): {
+  previewFps: number;
+  recentWindowFps: number;
+  effectiveFps: number;
+  runtimeMs: number;
+} => {
+  return {
+    previewFps: resolvePreviewFps(benchmark),
+    recentWindowFps: resolveRecentWindowFps(benchmark),
+    effectiveFps: resolveSessionAverageFps(benchmark),
+    runtimeMs: computeBenchmarkRuntimeMs(benchmark),
+  };
+};
+
+const getCurrentUiMetrics = (benchmark: BenchmarkAccumulator): {
+  previewFps: number;
+  recentWindowFps: number;
+  effectiveFps: number;
+} => {
+  return {
+    previewFps: resolvePreviewFps(benchmark),
+    recentWindowFps: resolveRecentWindowFps(benchmark),
+    effectiveFps: resolveEffectiveFps(benchmark),
+  };
+};
+
+const getBenchmarkMetrics = (benchmark: BenchmarkAccumulator): {
+  previewFps: number;
+  recentWindowFps: number;
+  effectiveFps: number;
+  runtimeMs: number;
+} => {
+  return getCurrentSnapshotMetrics(benchmark);
+};
+
+const applyUiMetrics = (benchmark: BenchmarkAccumulator, metrics: FrameSourceMetrics): void => {
+  const current = getCurrentUiMetrics(benchmark);
+  metrics.previewFps = current.previewFps;
+  metrics.recentWindowFps = current.recentWindowFps;
+  metrics.effectiveFps = current.effectiveFps;
+};
+
+const setLastIpcMetric = (metrics: FrameSourceMetrics, value: number): void => {
+  metrics.lastIpcMs = roundMetric(Math.max(0, value));
+};
+
+const setLastDecodeMetric = (metrics: FrameSourceMetrics, value: number): void => {
+  metrics.lastDecodeMs = roundMetric(Math.max(0, value));
+};
+
+const setLastPayloadMetric = (metrics: FrameSourceMetrics, value: number): void => {
+  metrics.lastPayloadBytes = Math.max(0, value);
+};
+
+const resetFirstFrameAt = (benchmark: BenchmarkAccumulator): void => {
+  benchmark.firstFrameAt = null;
+};
+
+const markBenchmarkFirstFrame = (benchmark: BenchmarkAccumulator, timestamp: number): void => {
+  if (benchmark.firstFrameAt === null) {
+    benchmark.firstFrameAt = timestamp;
+  }
+};
+
+const pushBenchmarkFrameInterval = (
+  benchmark: BenchmarkAccumulator,
+  currentTimestamp: number,
+  previousTimestamp: number,
+): void => {
+  pushWindowSample(benchmark.frameIntervalSamples, currentTimestamp - previousTimestamp);
+};
+
 const computeReconnectDelay = (attempt: number): number => {
   if (attempt <= 0) {
     return 0;
@@ -310,15 +492,6 @@ const computeReconnectDelay = (attempt: number): number => {
 
   const delay = INITIAL_RECONNECT_DELAY_MS * (RECONNECT_BACKOFF_MULTIPLIER ** (attempt - 1));
   return Math.round(Math.min(MAX_RECONNECT_DELAY_MS, delay));
-};
-
-const computeEmptyPollDelay = (
-  intervalMs: number,
-  consecutiveEmptyPolls: number,
-): number => {
-  const baseDelay = Math.max(4, Math.min(8, Math.round(intervalMs / 4)));
-  const multiplier = Math.min(3, Math.max(0, consecutiveEmptyPolls - 1));
-  return Math.min(MAX_EMPTY_POLL_DELAY_MS, baseDelay * (multiplier + 1));
 };
 
 const computeWatchdogThresholdMs = (
@@ -335,9 +508,24 @@ const computeWatchdogThresholdMs = (
   );
 };
 
-const selectRecoveryMode = (stopReason: string, attempt: number): RecoveryMode => {
+const selectRecoveryMode = (
+  stopReason: string,
+  attempt: number,
+  hasReceivedFrames: boolean,
+): RecoveryMode => {
   if (attempt <= 0) {
     return "cold-start";
+  }
+
+  if (
+    !hasReceivedFrames
+    && (
+      stopReason === "scanner-error"
+      || stopReason === "scanner-stopped"
+      || stopReason === "poll-error"
+    )
+  ) {
+    return "server-restart";
   }
 
   if (attempt <= DECODE_RESTART_MAX_ATTEMPTS) {
@@ -424,8 +612,8 @@ const createInitialState = (): FrameSourceState => {
  * Frame source that receives Rust-decoded preview frames via Tauri IPC.
  *
  * The live preview path is intentionally optimized for low latency, while
- * single-frame high-quality extraction is delegated to a separate ADB
- * screenshot path so capture quality no longer depends on preview transport.
+ * single-frame high-quality extraction is delegated to a dedicated Camera2
+ * still-capture path so export quality no longer depends on preview transport.
  */
 export class TauriNativeFrameSource implements FrameSource {
   private config: ScannerConfig;
@@ -434,6 +622,7 @@ export class TauriNativeFrameSource implements FrameSource {
   private readonly stateCallbacks = new Set<FrameSourceStateCallback>();
   private readonly benchmark: BenchmarkAccumulator = {
     startedAt: null,
+    firstFrameAt: null,
     totalFrames: 0,
     totalPolls: 0,
     totalEmptyPolls: 0,
@@ -456,12 +645,13 @@ export class TauriNativeFrameSource implements FrameSource {
   private eventListenersReady = false;
   private suppressUnexpectedEventsUntil = 0;
   private reconnectLoopPromise: Promise<void> | null = null;
-  private pollTimeoutId: ReturnType<typeof setTimeout> | null = null;
   private watchdogTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  private decoderStreamHandle: TauriDecodeStreamHandle | null = null;
   private cleanupListeners: (() => void) | null = null;
   private lastStateEmitAt = 0;
   private recoveryErrorReported = false;
   private streamStartedAt: number | null = null;
+  private decodeTargetRgba: Uint8ClampedArray | null = null;
 
   constructor(config: ScannerConfig) {
     this.config = config;
@@ -493,31 +683,21 @@ export class TauriNativeFrameSource implements FrameSource {
   }
 
   getBenchmarkSnapshot(): FrameSourceBenchmarkSnapshot {
-    const runtimeMs = this.benchmark.startedAt === null
-      ? 0
-      : Math.max(0, nowMs() - this.benchmark.startedAt);
-    const effectiveFps = runtimeMs > 0
-      ? this.benchmark.totalFrames / (runtimeMs / 1000)
-      : 0;
-    const steadyStateIntervals = this.benchmark.frameIntervalSamples.filter(
-      (sample) => sample <= STEADY_STATE_FRAME_GAP_THRESHOLD_MS,
-    );
-    const recentWindowFps = computeRecentWindowFps(steadyStateIntervals, 3000);
-    const previewFps = computeRecentWindowFps(this.benchmark.frameIntervalSamples, 1000);
+    const snapshotMetrics = getBenchmarkMetrics(this.benchmark);
 
     return {
       collectedAt: nowMs(),
       startedAt: this.benchmark.startedAt,
-      runtimeMs,
+      runtimeMs: snapshotMetrics.runtimeMs,
       status: this.state.status,
       targetPreviewFps: this.config.framerate,
       frameIndex: this.benchmark.totalFrames,
       totalFrames: this.benchmark.totalFrames,
       totalPolls: this.benchmark.totalPolls,
       emptyPolls: this.benchmark.totalEmptyPolls,
-      previewFps,
-      recentWindowFps,
-      effectiveFps,
+      previewFps: snapshotMetrics.previewFps,
+      recentWindowFps: snapshotMetrics.recentWindowFps,
+      effectiveFps: snapshotMetrics.effectiveFps,
       latestPayloadBytes: this.state.metrics.lastPayloadBytes,
       latestIpcMs: this.state.metrics.lastIpcMs,
       latestDecodeMs: this.state.metrics.lastDecodeMs,
@@ -541,12 +721,20 @@ export class TauriNativeFrameSource implements FrameSource {
   }
 
   async captureStillFrame(): Promise<ScannerStillCapture> {
-    const capture = await captureAdbScreenshotWithMetadata({
-      preferredDesktopSerial: this.config.serial,
-    });
+    const capturedAt = nowMs();
+    const jpegBytes = await captureTauriAdbStill(
+      this.config.serial,
+      this.config.remoteJarPath,
+      getStillCaptureSocketName(this.config.socketName),
+    );
 
     return {
-      ...capture,
+      file: buildStillCaptureFile(jpegBytes),
+      width: null,
+      height: null,
+      capturedAt,
+      source: "tauri-camera-still",
+      serial: this.config.serial,
       previewWidth: this.state.metrics.previewWidth,
       previewHeight: this.state.metrics.previewHeight,
     };
@@ -621,19 +809,15 @@ export class TauriNativeFrameSource implements FrameSource {
     }
 
     const { listen } = await import("@tauri-apps/api/event");
-    const unlistenError = await listen<string>("scanner:error", (event) => {
-      void this.handleUnexpectedStop(event.payload, "scanner-error");
-    });
-    const unlistenStopped = await listen<void>("scanner:stopped", () => {
-      void this.handleUnexpectedStop(
-        this.state.lastError ?? "Preview stream stopped unexpectedly.",
-        "scanner-stopped",
-      );
-    });
+    const unlistenDecoderStatus = await listen<DecoderLifecycleEvent>(
+      "scanner:decoder-status",
+      (event) => {
+        void this.handleDecoderLifecycleEvent(event.payload);
+      },
+    );
 
     this.cleanupListeners = () => {
-      unlistenError();
-      unlistenStopped();
+      unlistenDecoderStatus();
     };
     this.eventListenersReady = true;
   }
@@ -646,9 +830,45 @@ export class TauriNativeFrameSource implements FrameSource {
     this.eventListenersReady = false;
   }
 
+  private async handleDecoderLifecycleEvent(event: DecoderLifecycleEvent): Promise<void> {
+    if (!this.desiredRunning) {
+      return;
+    }
+
+    switch (event.state) {
+      case "reconnecting":
+        this.markReconnectStarted();
+        this.suppressUnexpectedEvents(RECOVERY_EVENT_SUPPRESSION_MS);
+        this.updateState(
+          {
+            status: "reconnecting",
+            lastError: event.detail,
+            stopReason: "decoder-reconnecting",
+            reconnectAttempt: Math.max(1, event.reconnectAttempt, this.state.reconnectAttempt),
+            nextReconnectDelayMs: null,
+          },
+          true,
+        );
+        return;
+      case "connected":
+        this.suppressUnexpectedEvents(RECOVERY_EVENT_SUPPRESSION_MS);
+        return;
+      case "ready":
+        this.activateReadyStream();
+        return;
+      case "error":
+      case "stopped":
+        await this.handleUnexpectedStop(event.detail, `decoder-${event.state}`);
+        return;
+      default:
+        return;
+    }
+  }
+
   private createServerArgs(): string[] {
     return [
       "--socket", this.config.socketName,
+      "--still-socket", getStillCaptureSocketName(this.config.socketName),
       "--width", String(this.config.width),
       "--height", String(this.config.height),
       "--bitrate", String(this.config.bitrate),
@@ -700,18 +920,56 @@ export class TauriNativeFrameSource implements FrameSource {
       await sleep(DECODE_RESTART_DELAY_MS);
     }
 
-    if (this.decoderRunning) {
-      this.streamActive = true;
+    if (this.decoderRunning && this.decoderStreamHandle) {
       return;
     }
 
-    await startTauriDecodeStream(this.config.localPort);
+    this.decoderStreamHandle = await startTauriDecodeStream(
+      this.config.localPort,
+      (framePacket) => {
+        void this.handleStreamPacket(framePacket);
+      },
+    );
     this.decoderRunning = true;
-    this.streamActive = true;
-    this.streamStartedAt = nowMs();
-    this.state.metrics.lastFrameAt = null;
-    this.state.metrics.consecutiveEmptyPolls = 0;
+  }
+
+  private activateReadyStream(): void {
+    if (!this.desiredRunning) {
+      return;
+    }
+
+    const shouldRefreshStreamingState = !this.streamActive
+      || this.state.status !== "streaming"
+      || this.benchmark.reconnectStartedAt !== null;
+
+    if (!shouldRefreshStreamingState) {
+      return;
+    }
+
+    this.decoderRunning = true;
+    this.recoveryErrorReported = false;
+    this.finishReconnectDowntime();
     this.suppressUnexpectedEvents(RECOVERY_EVENT_SUPPRESSION_MS);
+
+    if (!this.streamActive) {
+      this.streamStartedAt = nowMs();
+      this.state.metrics.lastFrameAt = null;
+      this.state.metrics.consecutiveEmptyPolls = 0;
+      this.clearTimers();
+      this.streamActive = true;
+      this.startWatchdog();
+    }
+
+    this.updateState(
+      {
+        status: "streaming",
+        stopReason: null,
+        lastError: null,
+        nextReconnectDelayMs: null,
+        reconnectAttempt: 0,
+      },
+      true,
+    );
   }
 
   private async performRecovery(mode: RecoveryMode): Promise<void> {
@@ -740,14 +998,12 @@ export class TauriNativeFrameSource implements FrameSource {
         });
         await this.ensureForward();
         await this.ensureServerRunning();
-        await sleep(SERVER_STARTUP_DELAY_MS);
         await this.ensureDecodeStream();
         return;
       case "cold-start":
       default:
         await this.ensureForward();
         await this.ensureServerRunning();
-        await sleep(SERVER_STARTUP_DELAY_MS);
         await this.ensureDecodeStream();
         return;
     }
@@ -770,7 +1026,11 @@ export class TauriNativeFrameSource implements FrameSource {
       const attempt = this.state.reconnectAttempt;
       const reconnectDelayMs = computeReconnectDelay(attempt);
       const nextStatus: FrameSourceStatus = attempt === 0 ? "starting" : "reconnecting";
-      const recoveryMode = selectRecoveryMode(reason, attempt);
+      const recoveryMode = selectRecoveryMode(
+        reason,
+        attempt,
+        this.benchmark.totalFrames > 0,
+      );
 
       this.updateState(
         {
@@ -795,22 +1055,6 @@ export class TauriNativeFrameSource implements FrameSource {
 
       try {
         await this.performRecovery(recoveryMode);
-        this.state.reconnectAttempt = 0;
-        this.recoveryErrorReported = false;
-        this.finishReconnectDowntime();
-        this.updateMetricsFromBenchmark();
-        this.updateState(
-          {
-            status: "streaming",
-            stopReason: null,
-            lastError: null,
-            nextReconnectDelayMs: null,
-            reconnectAttempt: 0,
-          },
-          true,
-        );
-        this.startPollLoop();
-        this.startWatchdog();
         return;
       } catch (error) {
         const message = toErrorMessage(error);
@@ -820,6 +1064,7 @@ export class TauriNativeFrameSource implements FrameSource {
         this.state.reconnectAttempt = nextAttempt;
         this.streamActive = false;
         this.decoderRunning = false;
+        this.decoderStreamHandle = null;
         this.updateState(
           {
             status: "reconnecting",
@@ -838,70 +1083,46 @@ export class TauriNativeFrameSource implements FrameSource {
     }
   }
 
-  private startPollLoop(): void {
-    this.clearPollLoop();
+  private async handleStreamPacket(framePacket: ArrayBuffer | Uint8Array): Promise<void> {
+    if (!this.desiredRunning) {
+      return;
+    }
 
-    const intervalMs = Math.max(1, Math.round(1000 / Math.max(1, this.config.framerate)));
-    const poll = async (): Promise<void> => {
-      if (!this.desiredRunning || !this.streamActive) {
-        return;
-      }
+    const packetByteLength = framePacket.byteLength;
+    if (packetByteLength <= FRAME_PACKET_HEADER_SIZE) {
+      return;
+    }
 
-      const cycleStart = nowMs();
-      let receivedFrame = false;
+    try {
+      this.activateReadyStream();
 
-      try {
-        const ipcStart = nowMs();
-        const data = await getTauriDecodedFrame();
-        const ipcMs = nowMs() - ipcStart;
+      const decodeStart = nowMs();
+      const { width, height, rgba } = decodeFramePacketToRgba(
+        framePacket,
+        this.decodeTargetRgba ?? undefined,
+      );
+      this.decodeTargetRgba = rgba;
+      const decodeMs = nowMs() - decodeStart;
+      const payloadBytes = packetByteLength - FRAME_PACKET_HEADER_SIZE;
 
-        this.benchmark.totalPolls += 1;
-        this.state.metrics.pollCount = this.benchmark.totalPolls;
-        this.state.metrics.lastIpcMs = ipcMs;
+      this.benchmark.totalPolls += 1;
+      this.state.metrics.pollCount = this.benchmark.totalPolls;
+      this.state.metrics.emptyPollCount = this.benchmark.totalEmptyPolls;
 
-        if (data.byteLength > FRAME_PACKET_HEADER_SIZE) {
-          const decodeStart = nowMs();
-          const { width, height, rgba } = decodeFramePacketToRgba(data);
-          const decodeMs = nowMs() - decodeStart;
-          const payloadBytes = data.byteLength - FRAME_PACKET_HEADER_SIZE;
-
-          receivedFrame = true;
-          this.handlePreviewFrame(
-            new ImageData(rgba, width, height),
-            width,
-            height,
-            payloadBytes,
-            ipcMs,
-            decodeMs,
-          );
-        } else {
-          this.handleEmptyPoll();
-        }
-      } catch (error) {
-        const message = `Preview polling failed: ${toErrorMessage(error)}`;
-        this.markReconnectStarted();
-        this.emitRecoverableError(message);
-        await this.handleUnexpectedStop(message, "poll-error");
-        return;
-      }
-
-      if (!this.desiredRunning || !this.streamActive) {
-        return;
-      }
-
-      const cycleMs = nowMs() - cycleStart;
-      const nextDelayMs = receivedFrame
-        ? Math.max(0, intervalMs - cycleMs)
-        : computeEmptyPollDelay(intervalMs, this.state.metrics.consecutiveEmptyPolls);
-
-      this.pollTimeoutId = setTimeout(() => {
-        void poll();
-      }, nextDelayMs);
-    };
-
-    this.pollTimeoutId = setTimeout(() => {
-      void poll();
-    }, 0);
+      this.handlePreviewFrame(
+        new ImageData(rgba, width, height),
+        width,
+        height,
+        payloadBytes,
+        0,
+        decodeMs,
+      );
+    } catch (error) {
+      const message = `Preview frame delivery failed: ${toErrorMessage(error)}`;
+      this.markReconnectStarted();
+      this.emitRecoverableError(message);
+      await this.handleUnexpectedStop(message, "stream-packet-error");
+    }
   }
 
   private startWatchdog(): void {
@@ -952,18 +1173,20 @@ export class TauriNativeFrameSource implements FrameSource {
 
     this.benchmark.totalFrames += 1;
     this.benchmark.lastFrameAt = timestamp;
+    markBenchmarkFirstFrame(this.benchmark, timestamp);
     pushWindowSample(this.benchmark.ipcSamples, ipcMs);
     pushWindowSample(this.benchmark.decodeSamples, decodeMs);
     pushWindowSample(this.benchmark.payloadSamples, payloadBytes);
 
     if (previousFrameAt !== null) {
-      pushWindowSample(this.benchmark.frameIntervalSamples, timestamp - previousFrameAt);
+      pushBenchmarkFrameInterval(this.benchmark, timestamp, previousFrameAt);
     }
 
     this.state.metrics.frameCount = this.benchmark.totalFrames;
     this.state.metrics.consecutiveEmptyPolls = 0;
-    this.state.metrics.lastPayloadBytes = payloadBytes;
-    this.state.metrics.lastDecodeMs = decodeMs;
+    setLastPayloadMetric(this.state.metrics, payloadBytes);
+    setLastIpcMetric(this.state.metrics, ipcMs);
+    setLastDecodeMetric(this.state.metrics, decodeMs);
     this.state.metrics.previewWidth = width;
     this.state.metrics.previewHeight = height;
     this.state.metrics.lastFrameAt = timestamp;
@@ -971,14 +1194,6 @@ export class TauriNativeFrameSource implements FrameSource {
     this.updateMetricsFromBenchmark();
     this.emitState(false);
     this.frameCallback?.(frame);
-  }
-
-  private handleEmptyPoll(): void {
-    this.benchmark.totalEmptyPolls += 1;
-    this.state.metrics.emptyPollCount = this.benchmark.totalEmptyPolls;
-    this.state.metrics.consecutiveEmptyPolls += 1;
-    this.updateMetricsFromBenchmark();
-    this.emitState(false);
   }
 
   private async handleUnexpectedStop(
@@ -995,6 +1210,7 @@ export class TauriNativeFrameSource implements FrameSource {
 
     this.streamActive = false;
     this.decoderRunning = false;
+    this.decoderStreamHandle = null;
     this.clearTimers();
     this.markReconnectStarted();
     this.emitRecoverableError(reason);
@@ -1022,9 +1238,7 @@ export class TauriNativeFrameSource implements FrameSource {
     const snapshot = this.getBenchmarkSnapshot();
     this.state.metrics.targetPreviewFps = snapshot.targetPreviewFps;
     this.state.metrics.frameIndex = snapshot.frameIndex;
-    this.state.metrics.previewFps = snapshot.previewFps;
-    this.state.metrics.recentWindowFps = snapshot.recentWindowFps;
-    this.state.metrics.effectiveFps = snapshot.effectiveFps;
+    applyUiMetrics(this.benchmark, this.state.metrics);
     this.state.metrics.reconnectCount = snapshot.reconnect.count;
     this.state.metrics.totalReconnectDowntimeMs = snapshot.reconnect.totalDowntimeMs;
     this.state.metrics.pollCount = this.benchmark.totalPolls;
@@ -1109,15 +1323,7 @@ export class TauriNativeFrameSource implements FrameSource {
   }
 
   private clearTimers(): void {
-    this.clearPollLoop();
     this.clearWatchdog();
-  }
-
-  private clearPollLoop(): void {
-    if (this.pollTimeoutId) {
-      clearTimeout(this.pollTimeoutId);
-      this.pollTimeoutId = null;
-    }
   }
 
   private clearWatchdog(): void {
@@ -1130,6 +1336,7 @@ export class TauriNativeFrameSource implements FrameSource {
   private async stopDecodeStream(): Promise<void> {
     this.streamActive = false;
     this.decoderRunning = false;
+    this.decoderStreamHandle = null;
     this.suppressUnexpectedEvents(RECOVERY_EVENT_SUPPRESSION_MS);
 
     try {
@@ -1172,6 +1379,7 @@ export class TauriNativeFrameSource implements FrameSource {
     this.state = createInitialState();
     this.state.capabilities = { ...DEFAULT_CAPABILITIES };
     this.benchmark.startedAt = nowMs();
+    resetFirstFrameAt(this.benchmark);
     this.benchmark.totalFrames = 0;
     this.benchmark.totalPolls = 0;
     this.benchmark.totalEmptyPolls = 0;
@@ -1186,6 +1394,8 @@ export class TauriNativeFrameSource implements FrameSource {
     this.benchmark.lastReconnectDowntimeMs = null;
     this.lastStateEmitAt = 0;
     this.streamStartedAt = null;
+    this.decodeTargetRgba = null;
+    this.decoderStreamHandle = null;
     this.streamActive = false;
     this.forwardActive = false;
     this.serverRunning = false;

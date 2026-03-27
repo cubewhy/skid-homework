@@ -391,9 +391,9 @@
       },
       "target": "{{fps}}+ FPS",
       "metrics": {
-        "now": "当前",
+        "now": "瞬时",
         "window": "窗口",
-        "effective": "有效",
+        "effective": "推流",
         "frame": "帧",
         "resolution": "分辨率"
       }
@@ -433,29 +433,30 @@
           "pending": "等待中",
           "fail": "未达标"
         },
-        "current": "当前 {{state}} (>= {{fps}} FPS)",
+        "current": "瞬时 {{state}} (>= {{fps}} FPS)",
         "window": "窗口 {{state}}",
-        "effective": "有效 {{state}}"
+        "effective": "推流 {{state}}"
       },
       "metrics": {
         "current-fps": {
-          "label": "当前 FPS",
+          "label": "瞬时 FPS",
           "hint": "最近一次帧间隔"
         },
         "window-fps": {
           "label": "窗口 FPS",
-          "hint": "短时滚动预览窗口"
+          "hint": "连续的短时滚动窗口"
         },
         "effective-fps": {
-          "label": "有效 FPS",
-          "hint": "传输采样"
+          "label": "推流 FPS",
+          "hint": "从首帧起的平均值，不含重连停顿"
         },
         "frame-index": "帧索引",
         "preview-resolution": "预览分辨率",
         "payload-size": "负载大小",
         "poll-count": "轮询次数",
-        "ipc": "IPC",
-        "frame-decode": "帧解码",
+        "poll-wait": "调用等待",
+        "js-decode": "JS 解码",
+        "canvas-draw": "Canvas 绘制",
         "last-update": "最近更新时间",
         "reconnect-status": "重连状态",
         "recent-error": "最近错误"

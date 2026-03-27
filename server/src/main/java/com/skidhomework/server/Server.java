@@ -24,6 +24,7 @@ import java.util.function.Consumer;
 public final class Server {
 
     private static final String DEFAULT_SOCKET_NAME = "scanner";
+    private static final String DEFAULT_STILL_SOCKET_SUFFIX = "-still";
     private static final int DEFAULT_WIDTH = 640;
     private static final int DEFAULT_HEIGHT = 360;
     private static final int DEFAULT_BITRATE = 2_000_000; // 2 Mbps
@@ -45,6 +46,7 @@ public final class Server {
 
         System.out.println("[Server] Starting camera server...");
         System.out.println("[Server] Socket: " + config.socketName);
+        System.out.println("[Server] Still socket: " + config.stillSocketName);
         System.out.println("[Server] Resolution: " + config.width + "x" + config.height);
         System.out.println("[Server] Bitrate: " + config.bitrate + ", FPS: " + config.framerate);
         System.out.println("[Server] Camera: " + config.cameraId);
@@ -52,8 +54,9 @@ public final class Server {
         AtomicReference<LocalServerSocket> serverSocketRef = new AtomicReference<>();
         AtomicReference<LocalSocket> clientSocketRef = new AtomicReference<>();
         AtomicReference<SocketRelay> relayRef = new AtomicReference<>();
-        SocketConnectionMonitor socketMonitor = null;
+        AtomicReference<CameraCapture> activeCaptureRef = new AtomicReference<>();
         SocketRelay relay = null;
+        StillCaptureSocketServer stillCaptureServer = null;
         AtomicBoolean shutdownRequested = new AtomicBoolean(false);
         AtomicReference<StopSignal> activeStopSignal = new AtomicReference<>();
         AtomicReference<StopReason> terminalStopReason = new AtomicReference<>();
@@ -106,12 +109,22 @@ public final class Server {
             // Create the socket relay that writes length-prefixed NAL units
             relay = new SocketRelay(outputStream, requestTerminalStop);
             relayRef.set(relay);
-            socketMonitor = new SocketConnectionMonitor(clientSocket, requestTerminalStop);
-            socketMonitor.start();
+            stillCaptureServer = new StillCaptureSocketServer(
+                    config.stillSocketName,
+                    () -> {
+                        CameraCapture activeCapture = activeCaptureRef.get();
+                        if (activeCapture == null) {
+                            throw new IllegalStateException("Camera session is not ready for still capture.");
+                        }
+                        return activeCapture.captureStillJpeg();
+                    }
+            );
+            stillCaptureServer.start();
 
             StopReason lastReason = runStreamingLoop(
                     config,
                     relay,
+                    activeCaptureRef,
                     shutdownRequested,
                     activeStopSignal,
                     terminalStopReason
@@ -127,8 +140,8 @@ public final class Server {
             System.err.println("[Server] Fatal error: " + e.getMessage());
             e.printStackTrace();
         } finally {
-            if (socketMonitor != null) {
-                socketMonitor.close();
+            if (stillCaptureServer != null) {
+                stillCaptureServer.close();
             }
             SocketRelay activeRelay = relayRef.getAndSet(null);
             if (activeRelay != null) {
@@ -146,6 +159,7 @@ public final class Server {
     private static StopReason runStreamingLoop(
             ServerConfig config,
             SocketRelay relay,
+            AtomicReference<CameraCapture> activeCaptureRef,
             AtomicBoolean shutdownRequested,
             AtomicReference<StopSignal> activeStopSignal,
             AtomicReference<StopReason> terminalStopReason
@@ -188,6 +202,7 @@ public final class Server {
 
                 encoder.start();
                 capture.start();
+                activeCaptureRef.set(capture);
                 System.out.println("[Server] Waiting for first encoded frame...");
                 encoder.awaitFirstFrame(STARTUP_FIRST_FRAME_TIMEOUT_MS);
 
@@ -200,6 +215,7 @@ public final class Server {
                 e.printStackTrace();
             } finally {
                 activeStopSignal.compareAndSet(sessionStopSignal, null);
+                activeCaptureRef.compareAndSet(capture, null);
                 if (capture != null) {
                     capture.stop();
                 }
@@ -362,6 +378,9 @@ public final class Server {
                 case "--width":
                     config.width = Integer.parseInt(args[++i]);
                     break;
+                case "--still-socket":
+                    config.stillSocketName = args[++i];
+                    break;
                 case "--height":
                     config.height = Integer.parseInt(args[++i]);
                     break;
@@ -380,16 +399,25 @@ public final class Server {
             }
         }
 
+        if (config.stillSocketName == null || config.stillSocketName.trim().isEmpty()) {
+            config.stillSocketName = defaultStillSocketName(config.socketName);
+        }
+
         return config;
     }
 
     private static final class ServerConfig {
         String socketName = DEFAULT_SOCKET_NAME;
+        String stillSocketName = defaultStillSocketName(DEFAULT_SOCKET_NAME);
         int width = DEFAULT_WIDTH;
         int height = DEFAULT_HEIGHT;
         int bitrate = DEFAULT_BITRATE;
         int framerate = DEFAULT_FRAMERATE;
         String cameraId = DEFAULT_CAMERA_ID;
+    }
+
+    private static String defaultStillSocketName(String previewSocketName) {
+        return previewSocketName + DEFAULT_STILL_SOCKET_SUFFIX;
     }
 
     private static void closeQuietly(LocalSocket socket) {

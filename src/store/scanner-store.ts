@@ -24,18 +24,20 @@ export type ScannerCvPipeline = "idle" | "preview" | "single-hq";
 export interface ScannerPreviewDebugState {
   /** Latest frame index observed by the UI. */
   frameIndex: number;
-  /** Instantaneous preview FPS estimated from the latest frame interval. */
+  /** Instant preview FPS derived from the latest frame interval. */
   previewFps: number | null;
-  /** Recent window FPS estimated from a short rolling frame history. */
+  /** Recent preview FPS across a contiguous short rolling window. */
   recentWindowFps: number | null;
-  /** Effective end-to-end FPS sampled from the transport log. */
+  /** Average active preview FPS since the first frame, excluding reconnect downtime. */
   effectiveFps: number | null;
   /** Latest payload size in bytes sampled from the transport log. */
   payloadBytes: number | null;
-  /** Latest IPC cost in milliseconds sampled from the transport log. */
-  ipcMs: number | null;
-  /** Latest frame decode cost in milliseconds sampled from the transport log. */
-  frameDecodeMs: number | null;
+  /** Latest wall-clock wait for the preview invoke/poll handoff in milliseconds. */
+  pollWaitMs: number | null;
+  /** Latest JavaScript frame packet decode cost in milliseconds. */
+  jsDecodeMs: number | null;
+  /** Latest canvas draw/upload cost for the preview surface in milliseconds. */
+  canvasDrawMs: number | null;
   /** Number of polling attempts reported by the transport log. */
   pollCount: number | null;
   /** Current preview frame width. */
@@ -95,6 +97,8 @@ export interface ScannerCaptureDebugState {
   highQualityStatus: ScannerHighQualityCaptureStatus;
   /** Source label used by the latest single high-quality extraction. */
   highQualitySource: string | null;
+  /** Reason why the high-quality path had to fall back to preview export. */
+  highQualityFallbackReason: string | null;
   /** Source label for the most recently completed capture artifact. */
   lastCaptureSource: "preview-stream" | "single-hq" | null;
   /** Width of the latest captured still image. */
@@ -148,14 +152,62 @@ export interface ScannerState {
   reset: () => void;
 }
 
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+};
+
+const isSamePatchValue = (current: unknown, next: unknown): boolean => {
+  if (Object.is(current, next)) {
+    return true;
+  }
+
+  if (Array.isArray(current) && Array.isArray(next)) {
+    return current.length === next.length
+      && current.every((value, index) => isSamePatchValue(value, next[index]));
+  }
+
+  if (isPlainObject(current) && isPlainObject(next)) {
+    const currentKeys = Object.keys(current);
+    const nextKeys = Object.keys(next);
+
+    return currentKeys.length === nextKeys.length
+      && currentKeys.every((key) => isSamePatchValue(current[key], next[key]));
+  }
+
+  return false;
+};
+
+const mergePatchIfChanged = <T extends object>(
+  current: T,
+  patch: Partial<T>,
+  ignoredKeys: ReadonlyArray<keyof T> = [],
+): T => {
+  const keys = Object.keys(patch) as Array<keyof T>;
+  const hasChange = keys.some((key) => {
+    if (ignoredKeys.includes(key)) {
+      return false;
+    }
+
+    return !isSamePatchValue(current[key], patch[key]);
+  });
+
+  return hasChange ? { ...current, ...patch } : current;
+};
+
 const createInitialPreviewDebugState = (): ScannerPreviewDebugState => ({
   frameIndex: 0,
   previewFps: null,
   recentWindowFps: null,
   effectiveFps: null,
   payloadBytes: null,
-  ipcMs: null,
-  frameDecodeMs: null,
+  pollWaitMs: null,
+  jsDecodeMs: null,
+  canvasDrawMs: null,
   pollCount: null,
   previewWidth: null,
   previewHeight: null,
@@ -190,6 +242,7 @@ const createInitialConnectionDebugState = (): ScannerConnectionDebugState => ({
 const createInitialCaptureDebugState = (): ScannerCaptureDebugState => ({
   highQualityStatus: "idle",
   highQualitySource: null,
+  highQualityFallbackReason: null,
   lastCaptureSource: null,
   lastCaptureWidth: null,
   lastCaptureHeight: null,
@@ -215,19 +268,30 @@ export const useScannerStore = create<ScannerState>((set) => ({
   ...createInitialState(),
 
   setStatus: (status, error) =>
-    set({ status, errorMessage: error ?? null }),
+    set((state) => {
+      const errorMessage = error ?? null;
+      return state.status === status && Object.is(state.errorMessage, errorMessage)
+        ? state
+        : { status, errorMessage };
+    }),
 
   setFrameSource: (source) =>
-    set({ frameSource: source }),
+    set((state) => {
+      return state.frameSource === source ? state : { frameSource: source };
+    }),
 
   setConfig: (config) =>
-    set({ config }),
+    set((state) => {
+      return state.config === config ? state : { config };
+    }),
 
   incrementFrameCount: () =>
     set((state) => ({ frameCount: state.frameCount + 1 })),
 
   resetFrameCount: () =>
-    set({ frameCount: 0 }),
+    set((state) => {
+      return state.frameCount === 0 ? state : { frameCount: 0 };
+    }),
 
   addCapturedDocument: (doc) =>
     set((state) => ({
@@ -243,24 +307,28 @@ export const useScannerStore = create<ScannerState>((set) => ({
     set({ capturedDocuments: [] }),
 
   setPreviewDebug: (patch) =>
-    set((state) => ({
-      previewDebug: { ...state.previewDebug, ...patch },
-    })),
+    set((state) => {
+      const previewDebug = mergePatchIfChanged(state.previewDebug, patch, ["updatedAt"]);
+      return previewDebug === state.previewDebug ? state : { previewDebug };
+    }),
 
   setCvDebug: (patch) =>
-    set((state) => ({
-      cvDebug: { ...state.cvDebug, ...patch },
-    })),
+    set((state) => {
+      const cvDebug = mergePatchIfChanged(state.cvDebug, patch, ["updatedAt"]);
+      return cvDebug === state.cvDebug ? state : { cvDebug };
+    }),
 
   setConnectionDebug: (patch) =>
-    set((state) => ({
-      connectionDebug: { ...state.connectionDebug, ...patch },
-    })),
+    set((state) => {
+      const connectionDebug = mergePatchIfChanged(state.connectionDebug, patch);
+      return connectionDebug === state.connectionDebug ? state : { connectionDebug };
+    }),
 
   setCaptureDebug: (patch) =>
-    set((state) => ({
-      captureDebug: { ...state.captureDebug, ...patch },
-    })),
+    set((state) => {
+      const captureDebug = mergePatchIfChanged(state.captureDebug, patch);
+      return captureDebug === state.captureDebug ? state : { captureDebug };
+    }),
 
   resetDebugState: () =>
     set({
