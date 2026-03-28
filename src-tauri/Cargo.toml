@@ -16,7 +16,10 @@ name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [profile.dev]
-incremental = true
+# Windows + MSVC + the current Rust/LLVM toolchain can emit malformed
+# incremental objects for this crate under the optimized dev profile,
+# which later fail at link time with unresolved anon/.llvm symbols.
+incremental = false
 opt-level = 3
 debug = 0
 

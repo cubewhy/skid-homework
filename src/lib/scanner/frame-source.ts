@@ -131,6 +131,7 @@ export interface ScannerStillCapture {
   serial: string;
   previewWidth: number | null;
   previewHeight: number | null;
+  transport: string;
 }
 
 type DecoderLifecycleState = "starting" | "connected" | "reconnecting" | "ready" | "error" | "stopped";
@@ -198,11 +199,302 @@ const getStillCaptureSocketName = (socketName: string): string => {
   return `${socketName}${STILL_CAPTURE_SOCKET_SUFFIX}`;
 };
 
-const buildStillCaptureFile = (bytes: Uint8Array): File => {
-  const fileName = `camera_still_${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`;
+const JPEG_SOI_MARKER = 0xffd8;
+const JPEG_SEGMENT_MARKER_PREFIX = 0xff;
+const JPEG_START_OF_SCAN_MARKER = 0xda;
+const JPEG_START_OF_FRAME_MARKERS = new Set([
+  0xc0, 0xc1, 0xc2, 0xc3,
+  0xc5, 0xc6, 0xc7,
+  0xc9, 0xca, 0xcb,
+  0xcd, 0xce, 0xcf,
+]);
+
+const readBigEndianMarker = (bytes: Uint8Array, index: number): number | null => {
+  if (index < 0 || index + 1 >= bytes.byteLength) {
+    return null;
+  }
+
+  return (bytes[index] << 8) | bytes[index + 1];
+};
+
+const readNextJpegMarker = (
+  bytes: Uint8Array,
+  offset: number,
+): { marker: number; markerStart: number; nextOffset: number } | null => {
+  if (offset < 0 || offset >= bytes.byteLength || bytes[offset] !== JPEG_SEGMENT_MARKER_PREFIX) {
+    return null;
+  }
+
+  const markerStart = offset;
+  while (offset < bytes.byteLength && bytes[offset] === JPEG_SEGMENT_MARKER_PREFIX) {
+    offset += 1;
+  }
+
+  if (offset >= bytes.byteLength) {
+    return null;
+  }
+
+  return {
+    marker: bytes[offset],
+    markerStart,
+    nextOffset: offset + 1,
+  };
+};
+
+const scanJpegEntropyData = (
+  bytes: Uint8Array,
+  offset: number,
+): { nextMarkerOffset: number; end: number | null } | null => {
+  while (offset + 1 < bytes.byteLength) {
+    if (bytes[offset] !== JPEG_SEGMENT_MARKER_PREFIX) {
+      offset += 1;
+      continue;
+    }
+
+    const marker = readNextJpegMarker(bytes, offset);
+    if (!marker) {
+      return null;
+    }
+
+    if (marker.marker === 0x00) {
+      offset = marker.nextOffset;
+      continue;
+    }
+
+    if (marker.marker >= 0xd0 && marker.marker <= 0xd7) {
+      offset = marker.nextOffset;
+      continue;
+    }
+
+    if (marker.marker === 0xd9) {
+      return {
+        nextMarkerOffset: marker.markerStart,
+        end: marker.nextOffset,
+      };
+    }
+
+    return {
+      nextMarkerOffset: marker.markerStart,
+      end: null,
+    };
+  }
+
+  return null;
+};
+
+const findJpegPayloadBoundsFrom = (
+  bytes: Uint8Array,
+  startIndex: number,
+): { start: number; end: number } | null => {
+  if (readBigEndianMarker(bytes, startIndex) !== JPEG_SOI_MARKER) {
+    return null;
+  }
+
+  let offset = startIndex + 2;
+
+  while (offset + 1 < bytes.byteLength) {
+    const markerInfo = readNextJpegMarker(bytes, offset);
+    if (!markerInfo) {
+      return null;
+    }
+
+    const marker = markerInfo.marker;
+    offset = markerInfo.nextOffset;
+
+    if (marker === 0xd9) {
+      return { start: startIndex, end: offset };
+    }
+
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+      continue;
+    }
+
+    if (offset + 1 >= bytes.byteLength) {
+      return null;
+    }
+
+    const segmentLength = readBigEndianMarker(bytes, offset);
+    if (segmentLength === null || segmentLength < 2 || offset + segmentLength > bytes.byteLength) {
+      return null;
+    }
+
+    offset += segmentLength;
+
+    if (marker !== JPEG_START_OF_SCAN_MARKER) {
+      continue;
+    }
+
+    // Some vendors emit multi-scan/progressive JPEGs. When the entropy-coded
+    // segment ends at another marker instead of EOI, continue parsing until we
+    // reach the real end-of-image marker.
+    const entropyScan = scanJpegEntropyData(bytes, offset);
+    if (!entropyScan) {
+      return null;
+    }
+
+    if (entropyScan.end !== null) {
+      return { start: startIndex, end: entropyScan.end };
+    }
+
+    offset = entropyScan.nextMarkerOffset;
+  }
+
+  return null;
+};
+
+const extractJpegPayload = (bytes: Uint8Array): Uint8Array => {
+  for (let index = 0; index < bytes.byteLength - 1; index += 1) {
+    if (readBigEndianMarker(bytes, index) !== JPEG_SOI_MARKER) {
+      continue;
+    }
+
+    const bounds = findJpegPayloadBoundsFrom(bytes, index);
+    if (bounds) {
+      return bytes.slice(bounds.start, bounds.end);
+    }
+  }
+
+  return bytes;
+};
+
+const readJpegDimensions = (
+  bytes: Uint8Array,
+): { width: number; height: number } | null => {
+  if (readBigEndianMarker(bytes, 0) !== JPEG_SOI_MARKER) {
+    return null;
+  }
+
+  let offset = 2;
+  while (offset + 3 < bytes.byteLength) {
+    while (offset < bytes.byteLength && bytes[offset] === JPEG_SEGMENT_MARKER_PREFIX) {
+      offset += 1;
+    }
+
+    if (offset >= bytes.byteLength) {
+      break;
+    }
+
+    const marker = bytes[offset];
+    offset += 1;
+
+    if (marker === 0x01) {
+      continue;
+    }
+
+    if (marker === 0xd9 || marker === JPEG_START_OF_SCAN_MARKER) {
+      break;
+    }
+
+    if (offset + 1 >= bytes.byteLength) {
+      break;
+    }
+
+    const segmentLength = readBigEndianMarker(bytes, offset);
+    if (segmentLength === null || segmentLength < 2 || offset + segmentLength > bytes.byteLength) {
+      break;
+    }
+
+    if (JPEG_START_OF_FRAME_MARKERS.has(marker)) {
+      if (segmentLength < 7) {
+        return null;
+      }
+
+      const height = readBigEndianMarker(bytes, offset + 3);
+      const width = readBigEndianMarker(bytes, offset + 5);
+      if (width === null || height === null) {
+        return null;
+      }
+
+      return { width, height };
+    }
+
+    offset += segmentLength;
+  }
+
+  return null;
+};
+
+const findMarkerOffset = (
+  bytes: Uint8Array,
+  marker: number,
+  fromEnd: boolean = false,
+): number | null => {
+  if (fromEnd) {
+    for (let index = bytes.byteLength - 2; index >= 0; index -= 1) {
+      if (readBigEndianMarker(bytes, index) === marker) {
+        return index;
+      }
+    }
+    return null;
+  }
+
+  for (let index = 0; index < bytes.byteLength - 1; index += 1) {
+    if (readBigEndianMarker(bytes, index) === marker) {
+      return index;
+    }
+  }
+
+  return null;
+};
+
+const describeHexWindow = (
+  bytes: Uint8Array,
+  count: number,
+  fromEnd: boolean = false,
+): string => {
+  if (bytes.byteLength === 0) {
+    return "∅";
+  }
+
+  const safeCount = Math.max(1, Math.min(count, bytes.byteLength));
+  const slice = fromEnd
+    ? bytes.slice(bytes.byteLength - safeCount)
+    : bytes.slice(0, safeCount);
+  return [...slice].map((value) => value.toString(16).padStart(2, "0")).join(" ");
+};
+
+const describeStillPayloadDiagnostics = (
+  bytes: Uint8Array,
+  mimeType: string,
+): Record<string, unknown> => {
+  const startsWithSoi = mimeType === "image/jpeg"
+    ? readBigEndianMarker(bytes, 0) === JPEG_SOI_MARKER
+    : null;
+  const firstSoiOffset = mimeType === "image/jpeg"
+    ? findMarkerOffset(bytes, JPEG_SOI_MARKER)
+    : null;
+  const lastEoiOffset = mimeType === "image/jpeg"
+    ? findMarkerOffset(bytes, 0xffd9, true)
+    : null;
+  const dimensions = mimeType === "image/jpeg"
+    ? readJpegDimensions(bytes)
+    : null;
+
+  return {
+    mimeType,
+    byteLength: bytes.byteLength,
+    headHex: describeHexWindow(bytes, 16),
+    tailHex: describeHexWindow(bytes, 16, true),
+    startsWithSoi,
+    firstSoiOffset,
+    lastEoiOffset,
+    dimensions,
+  };
+};
+
+const formatStillPayloadDiagnostics = (payload: Record<string, unknown>): string => {
+  return JSON.stringify(payload);
+};
+
+const buildStillCaptureFile = (
+  bytes: Uint8Array,
+  mimeType = "image/jpeg",
+): File => {
+  const extension = mimeType === "image/png" ? "png" : "jpg";
+  const fileName = `camera_still_${new Date().toISOString().replace(/[:.]/g, "-")}.${extension}`;
   const blobCompatibleBytes = new Uint8Array(bytes.byteLength);
   blobCompatibleBytes.set(bytes);
-  return new File([blobCompatibleBytes], fileName, { type: "image/jpeg" });
+  return new File([blobCompatibleBytes], fileName, { type: mimeType });
 };
 const BENCHMARK_EMIT_INTERVAL_MS = 250;
 const BENCHMARK_WINDOW_SIZE = 240;
@@ -214,6 +506,8 @@ const FORWARD_RESTART_MAX_ATTEMPTS = 3;
 const RECOVERY_EVENT_SUPPRESSION_MS = 2500;
 const STEADY_STATE_STALL_MIN_GRACE_MS = 4500;
 const STEADY_STATE_STALL_FRAME_MULTIPLIER = 48;
+const MAX_TCP_PORT = 65535;
+const FORWARD_PORT_FALLBACK_OFFSETS = [0, 1, 2, 3, 4, 5, 10, 20, 50, 100, 200, 500];
 
 type RecoveryMode =
   | "cold-start"
@@ -261,6 +555,36 @@ const sleep = async (delayMs: number): Promise<void> => {
 
 const toErrorMessage = (error: unknown): string => {
   return error instanceof Error ? error.message : String(error);
+};
+
+const isLocalForwardBindError = (error: unknown): boolean => {
+  const message = toErrorMessage(error).toLowerCase();
+  return [
+    "cannot bind listener",
+    "cannot bind to 127.0.0.1",
+    "10013",
+    "10048",
+    "access permissions",
+    "only one usage of each socket address",
+    "访问权限不允许",
+    "访问套接字",
+  ].some((pattern) => message.includes(pattern));
+};
+
+const buildForwardPortCandidates = (preferredPort: number): number[] => {
+  const basePort = Number.isInteger(preferredPort) && preferredPort > 0
+    ? preferredPort
+    : DEFAULT_SCANNER_CONFIG.localPort;
+
+  const candidates = new Set<number>();
+  for (const offset of FORWARD_PORT_FALLBACK_OFFSETS) {
+    const candidate = basePort + offset;
+    if (candidate > 0 && candidate <= MAX_TCP_PORT) {
+      candidates.add(candidate);
+    }
+  }
+
+  return [...candidates];
 };
 
 const pushWindowSample = (samples: number[], value: number): void => {
@@ -639,6 +963,7 @@ export class TauriNativeFrameSource implements FrameSource {
   private state: FrameSourceState = createInitialState();
   private desiredRunning = false;
   private streamActive = false;
+  private previewPauseDepth = 0;
   private forwardActive = false;
   private serverRunning = false;
   private decoderRunning = false;
@@ -722,22 +1047,49 @@ export class TauriNativeFrameSource implements FrameSource {
 
   async captureStillFrame(): Promise<ScannerStillCapture> {
     const capturedAt = nowMs();
-    const jpegBytes = await captureTauriAdbStill(
-      this.config.serial,
-      this.config.remoteJarPath,
-      getStillCaptureSocketName(this.config.socketName),
-    );
+    this.pausePreviewDelivery();
+    try {
+      const stillPayload = await captureTauriAdbStill(
+        this.config.serial,
+        this.config.remoteJarPath,
+        getStillCaptureSocketName(this.config.socketName),
+      );
+      const stillBytes = stillPayload.mimeType === "image/jpeg"
+        ? extractJpegPayload(stillPayload.bytes)
+        : stillPayload.bytes;
+      const dimensions = stillPayload.mimeType === "image/jpeg"
+        ? readJpegDimensions(stillBytes)
+        : null;
 
-    return {
-      file: buildStillCaptureFile(jpegBytes),
-      width: null,
-      height: null,
-      capturedAt,
-      source: "tauri-camera-still",
-      serial: this.config.serial,
-      previewWidth: this.state.metrics.previewWidth,
-      previewHeight: this.state.metrics.previewHeight,
-    };
+      console.info(
+        `[Scanner][StillDiag] Captured high-quality still payload: ${formatStillPayloadDiagnostics({
+          serial: this.config.serial,
+          transport: stillPayload.transport,
+          raw: describeStillPayloadDiagnostics(stillPayload.bytes, stillPayload.mimeType),
+          extracted: describeStillPayloadDiagnostics(stillBytes, stillPayload.mimeType),
+          extractionTrimmedBytes: stillPayload.bytes.byteLength - stillBytes.byteLength,
+          previewDimensions: {
+            width: this.state.metrics.previewWidth,
+            height: this.state.metrics.previewHeight,
+          },
+          capturedAt,
+        })}`,
+      );
+
+      return {
+        file: buildStillCaptureFile(stillBytes, stillPayload.mimeType),
+        width: dimensions?.width ?? null,
+        height: dimensions?.height ?? null,
+        capturedAt,
+        source: "tauri-camera-still",
+        serial: this.config.serial,
+        previewWidth: this.state.metrics.previewWidth,
+        previewHeight: this.state.metrics.previewHeight,
+        transport: stillPayload.transport,
+      };
+    } finally {
+      this.resumePreviewDelivery();
+    }
   }
 
   async start(): Promise<void> {
@@ -890,12 +1242,37 @@ export class TauriNativeFrameSource implements FrameSource {
       return;
     }
 
-    await forwardTauriAdbPort(
-      this.config.serial,
-      this.config.localPort,
-      this.config.socketName,
-    );
-    this.forwardActive = true;
+    const preferredPort = this.config.localPort;
+    const candidates = buildForwardPortCandidates(preferredPort);
+    let bindFailureSeen = false;
+    let lastError: unknown = null;
+
+    for (const candidatePort of candidates) {
+      try {
+        await forwardTauriAdbPort(
+          this.config.serial,
+          candidatePort,
+          this.config.socketName,
+        );
+        this.config.localPort = candidatePort;
+        this.forwardActive = true;
+
+        if (bindFailureSeen && candidatePort !== preferredPort) {
+          console.warn(
+            `[Scanner] Preferred local forward port ${preferredPort} was unavailable; switched preview transport to ${candidatePort}.`,
+          );
+        }
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!isLocalForwardBindError(error) || candidatePort === candidates[candidates.length - 1]) {
+          throw error;
+        }
+        bindFailureSeen = true;
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error(toErrorMessage(lastError));
   }
 
   private async ensureServerRunning(): Promise<void> {
@@ -1095,6 +1472,12 @@ export class TauriNativeFrameSource implements FrameSource {
 
     try {
       this.activateReadyStream();
+      if (this.previewPauseDepth > 0) {
+        this.benchmark.totalPolls += 1;
+        this.state.metrics.pollCount = this.benchmark.totalPolls;
+        this.state.metrics.emptyPollCount = this.benchmark.totalEmptyPolls;
+        return;
+      }
 
       const decodeStart = nowMs();
       const { width, height, rgba } = decodeFramePacketToRgba(
@@ -1122,6 +1505,24 @@ export class TauriNativeFrameSource implements FrameSource {
       this.markReconnectStarted();
       this.emitRecoverableError(message);
       await this.handleUnexpectedStop(message, "stream-packet-error");
+    }
+  }
+
+  private pausePreviewDelivery(): void {
+    this.previewPauseDepth += 1;
+    if (this.previewPauseDepth === 1) {
+      this.clearWatchdog();
+    }
+  }
+
+  private resumePreviewDelivery(): void {
+    if (this.previewPauseDepth === 0) {
+      return;
+    }
+
+    this.previewPauseDepth -= 1;
+    if (this.previewPauseDepth === 0 && this.desiredRunning && this.streamActive) {
+      this.startWatchdog();
     }
   }
 

@@ -12,14 +12,20 @@ import {
   createFrameSource,
   DEFAULT_SCANNER_CONFIG,
   detectDocumentContour,
-  enhanceDocumentImage,
+  evaluateFrameMappingCompatibility,
   type FrameSource,
   type FrameSourceState,
   type Point,
+  scalePointsBetweenFrames,
   type ScannerConfig,
+  type ScannerStillCapture,
   StabilityTracker,
 } from "@/lib/scanner";
+import {createScannerCvWorkerClient, type ScannerCvWorkerClient} from "@/lib/scanner/cv-worker-client";
+import {decodeBlobToImageData, type OrthogonalRotation, rotateImageData} from "@/lib/scanner/image-data";
 import {isOpenCvReady} from "@/lib/scanner/opencv-runtime";
+import {orientPointsForPreview} from "@/lib/scanner/preview-orientation";
+import {shellTauriAdbCommand} from "@/lib/tauri/adb";
 import {getSelectedDesktopAdbSerial} from "@/lib/webadb/screenshot";
 import {useScannerStore} from "@/store/scanner-store";
 import {cn} from "@/lib/utils";
@@ -50,6 +56,19 @@ interface PreviewCaptureSnapshot {
   points: Point[] | null;
 }
 
+interface HighQualityCaptureArtifact {
+  blob: Blob;
+  frame: ImageData;
+  source: string;
+  width: number | null;
+  height: number | null;
+}
+
+interface DocumentCaptureArtifact {
+  blob: Blob;
+  frame: ImageData;
+}
+
 type OptionalDebugFrameSource = FrameSource & {
   onDebugState?: (callback: (payload: unknown) => void) => void;
   onConnectionState?: (callback: (payload: unknown) => void) => void;
@@ -66,6 +85,7 @@ const CV_MAX_HEIGHT = 180;
 const AUTO_CAPTURE_STABLE_HOLD_MS = 1200;
 const AUTO_CAPTURE_STABLE_FRAMES = 8;
 const AUTO_CAPTURE_VARIANCE_THRESHOLD = 8;
+const STILL_CAPTURE_ROTATION_CANDIDATES: readonly OrthogonalRotation[] = [0, 90, 270, 180] as const;
 
 const cloneFrame = (frame: ImageData): ImageData => {
   return new ImageData(new Uint8ClampedArray(frame.data), frame.width, frame.height);
@@ -73,6 +93,66 @@ const cloneFrame = (frame: ImageData): ImageData => {
 
 const clonePoints = (points: Point[] | null): Point[] | null => {
   return points?.map((point) => ({ ...point })) ?? null;
+};
+
+const getCapturedDocumentCacheKey = (file: File): string => {
+  return `${file.name}:${file.size}:${file.lastModified}:${file.type}`;
+};
+
+const describeHexWindow = (bytes: Uint8Array, count: number, fromEnd: boolean = false): string => {
+  if (bytes.byteLength === 0) {
+    return "∅";
+  }
+
+  const safeCount = Math.max(1, Math.min(count, bytes.byteLength));
+  const slice = fromEnd
+    ? bytes.slice(bytes.byteLength - safeCount)
+    : bytes.slice(0, safeCount);
+  return [...slice].map((value) => value.toString(16).padStart(2, "0")).join(" ");
+};
+
+const findJpegMarkerOffset = (
+  bytes: Uint8Array,
+  markerHigh: number,
+  markerLow: number,
+  fromEnd: boolean = false,
+): number | null => {
+  if (fromEnd) {
+    for (let index = bytes.byteLength - 2; index >= 0; index -= 1) {
+      if (bytes[index] === markerHigh && bytes[index + 1] === markerLow) {
+        return index;
+      }
+    }
+    return null;
+  }
+
+  for (let index = 0; index < bytes.byteLength - 1; index += 1) {
+    if (bytes[index] === markerHigh && bytes[index + 1] === markerLow) {
+      return index;
+    }
+  }
+
+  return null;
+};
+
+const describeBlobDiagnostics = async (blob: Blob): Promise<Record<string, unknown>> => {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  return {
+    mimeType: blob.type,
+    byteLength: bytes.byteLength,
+    headHex: describeHexWindow(bytes, 16),
+    tailHex: describeHexWindow(bytes, 16, true),
+    startsWithJpegSoi:
+      bytes.byteLength >= 2
+        ? bytes[0] === 0xff && bytes[1] === 0xd8
+        : false,
+    firstSoiOffset: findJpegMarkerOffset(bytes, 0xff, 0xd8),
+    lastEoiOffset: findJpegMarkerOffset(bytes, 0xff, 0xd9, true),
+  };
+};
+
+const formatDiagnostics = (payload: Record<string, unknown>): string => {
+  return JSON.stringify(payload);
 };
 
 const imageDataToPngBlob = async (frame: ImageData): Promise<Blob> => {
@@ -207,8 +287,8 @@ const pointsEqual = (left: Point[] | null, right: Point[] | null): boolean => {
 /**
  * Live camera scanner dialog component.
  *
- * Uses the live document-camera preview for both CV detection and document
- * post-processing, while surfacing benchmark/debug metrics directly in the UI.
+ * Uses the live document-camera preview for CV detection while preferring a
+ * high-quality still capture for final document export whenever possible.
  */
 export default function ScannerView({
   isOpen,
@@ -226,6 +306,8 @@ export default function ScannerView({
   const frameSourceUnsubscribeRef = useRef<(() => void) | null>(null);
   const frameSourceSessionGenerationRef = useRef(0);
   const cvLoopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cvWorkerRef = useRef<ScannerCvWorkerClient | null>(null);
+  const cvWorkerReadyRef = useRef(false);
   const cvDetectionInFlightRef = useRef(false);
   const lastCvFrameVersionRef = useRef(0);
   const processingRef = useRef(false);
@@ -240,6 +322,7 @@ export default function ScannerView({
   const captureCommitPendingRef = useRef(false);
   const stableSinceRef = useRef<number | null>(null);
   const autoCaptureRef = useRef(true);
+  const capturedPreviewUrlCacheRef = useRef<Map<string, string>>(new Map());
   const trackerRef = useRef<StabilityTracker>(
     new StabilityTracker(AUTO_CAPTURE_STABLE_FRAMES, AUTO_CAPTURE_VARIANCE_THRESHOLD),
   );
@@ -250,6 +333,7 @@ export default function ScannerView({
   const [autoCapture, setAutoCapture] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isCaptureCommitPending, setIsCaptureCommitPending] = useState(false);
+  const [capturedPreviewUrls, setCapturedPreviewUrls] = useState<string[]>([]);
   const [previewOrientation, setPreviewOrientation] = useState<"landscape" | "portrait">("landscape");
   const { t } = useTranslation("commons", { keyPrefix: "document-scanner" });
 
@@ -282,17 +366,39 @@ export default function ScannerView({
     return `${previewWidth} × ${previewHeight}`;
   }, [previewHeight, previewWidth]);
 
-  const capturedPreviewUrls = useMemo(() => {
-    return capturedDocuments.map((file) => URL.createObjectURL(file));
+  useEffect(() => {
+    const activeKeys = new Set<string>();
+    const nextUrls = capturedDocuments.map((file) => {
+      const key = getCapturedDocumentCacheKey(file);
+      activeKeys.add(key);
+
+      let url = capturedPreviewUrlCacheRef.current.get(key);
+      if (!url) {
+        url = URL.createObjectURL(file);
+        capturedPreviewUrlCacheRef.current.set(key, url);
+      }
+
+      return url;
+    });
+
+    for (const [key, url] of capturedPreviewUrlCacheRef.current.entries()) {
+      if (!activeKeys.has(key)) {
+        URL.revokeObjectURL(url);
+        capturedPreviewUrlCacheRef.current.delete(key);
+      }
+    }
+
+    setCapturedPreviewUrls(nextUrls);
   }, [capturedDocuments]);
 
   useEffect(() => {
     return () => {
-      for (const url of capturedPreviewUrls) {
+      for (const url of capturedPreviewUrlCacheRef.current.values()) {
         URL.revokeObjectURL(url);
       }
+      capturedPreviewUrlCacheRef.current.clear();
     };
-  }, [capturedPreviewUrls]);
+  }, []);
 
   const clearProcessingCooldown = useCallback(() => {
     if (processingCooldownRef.current) {
@@ -346,6 +452,34 @@ export default function ScannerView({
     cvDetectionInFlightRef.current = false;
   }, []);
 
+  const terminateCvWorker = useCallback(() => {
+    cvWorkerReadyRef.current = false;
+    const worker = cvWorkerRef.current;
+    cvWorkerRef.current = null;
+    worker?.terminate();
+  }, []);
+
+  const ensureCvWorker = useCallback(async (): Promise<ScannerCvWorkerClient | null> => {
+    let worker = cvWorkerRef.current;
+    if (!worker) {
+      worker = createScannerCvWorkerClient();
+      cvWorkerRef.current = worker;
+    }
+
+    const ready = await worker.ensureReady();
+    cvWorkerReadyRef.current = ready;
+    if (ready) {
+      return worker;
+    }
+
+    terminateCvWorker();
+    return null;
+  }, [terminateCvWorker]);
+
+  const isCvRuntimeReady = useCallback((): boolean => {
+    return isOpenCvReady() || cvWorkerReadyRef.current;
+  }, []);
+
   const setProcessingState = useCallback((next: boolean) => {
     processingRef.current = next;
     setIsProcessing(next);
@@ -387,7 +521,7 @@ export default function ScannerView({
   ) => {
     setCvDebug({
       pipeline,
-      cvReady: isOpenCvReady(),
+      cvReady: isCvRuntimeReady(),
       documentDetected: Boolean(detectedPoints && detectedPoints.length === 4),
       cornerCount: detectedPoints?.length ?? 0,
       cornerPoints: detectedPoints ?? [],
@@ -398,7 +532,34 @@ export default function ScannerView({
       isProcessing: processing,
       updatedAt: Date.now(),
     });
-  }, [autoCapture, setCvDebug]);
+  }, [autoCapture, isCvRuntimeReady, setCvDebug]);
+
+  const detectDocumentContourWithFallback = useCallback(async (
+    frame: ImageData,
+    frameVersion: number,
+    processingSize: { width: number; height: number },
+  ): Promise<Point[] | null> => {
+    const worker = cvWorkerRef.current;
+    if (worker?.isReady()) {
+      try {
+        const result = await worker.detect(frame, {
+          frameVersion,
+          maxWidth: processingSize.width,
+          maxHeight: processingSize.height,
+        });
+        cvWorkerReadyRef.current = true;
+        return result.points;
+      } catch (error) {
+        console.warn("[Scanner] CV worker detection failed, falling back to main thread:", error);
+        terminateCvWorker();
+      }
+    }
+
+    return detectDocumentContour(frame, {
+      maxWidth: processingSize.width,
+      maxHeight: processingSize.height,
+    });
+  }, [terminateCvWorker]);
 
   const applyPerfSample = useCallback((sample: FrontendPerfSample) => {
     setPreviewDebug({
@@ -638,30 +799,170 @@ export default function ScannerView({
   const buildDocumentBlob = useCallback(async (
     frame: ImageData,
     documentPoints: Point[] | null,
-  ): Promise<Blob> => {
-    if (documentPoints && documentPoints.length === 4) {
-      const warpedBlob = await applyPerspectiveTransform(frame, documentPoints);
-      return await enhanceDocumentImage(warpedBlob);
+  ): Promise<DocumentCaptureArtifact> => {
+    const exportOrientation = previewOrientationRef.current;
+    const exportFrame = exportOrientation === "portrait"
+      ? rotateImageData(frame, 90)
+      : frame;
+    const exportPoints = documentPoints && documentPoints.length === 4
+      ? (
+          exportOrientation === "portrait"
+            ? orientPointsForPreview(documentPoints, frame.width, frame.height, "portrait")
+            : documentPoints
+        )
+      : null;
+
+    if (exportPoints && exportPoints.length === 4) {
+      return {
+        blob: await applyPerspectiveTransform(exportFrame, exportPoints),
+        frame: exportFrame,
+      };
     }
 
-    return await imageDataToPngBlob(frame);
+    return {
+      blob: await imageDataToPngBlob(exportFrame),
+      frame: exportFrame,
+    };
+  }, []);
+
+  const logHighQualityStillFailureDiagnostics = useCallback(async (
+    stillCapture: ScannerStillCapture,
+    error: unknown,
+  ): Promise<void> => {
+    try {
+      const blobDiagnostics = await describeBlobDiagnostics(stillCapture.file);
+      console.warn(
+        `[Scanner][StillDiag] High-quality still decode failed. ${formatDiagnostics({
+          error: error instanceof Error ? error.message : String(error),
+          serial: stillCapture.serial,
+          source: stillCapture.source,
+          transport: stillCapture.transport,
+          capturedAt: stillCapture.capturedAt,
+          previewWidth: stillCapture.previewWidth,
+          previewHeight: stillCapture.previewHeight,
+          stillWidth: stillCapture.width,
+          stillHeight: stillCapture.height,
+          blob: blobDiagnostics,
+        })}`,
+      );
+    } catch (diagnosticError) {
+      console.warn("[Scanner][StillDiag] Failed to summarize high-quality still blob.", diagnosticError);
+    }
+
+    try {
+      const serverLogTail = await shellTauriAdbCommand(
+        stillCapture.serial,
+        "tail -n 80 /data/local/tmp/skid-scanner-server.log",
+      );
+      if (serverLogTail.trim().length > 0) {
+        console.warn(`[Scanner][StillDiag] Device scanner server log tail:\n${serverLogTail}`);
+      } else {
+        console.warn("[Scanner][StillDiag] Device scanner server log tail was empty.");
+      }
+    } catch (serverLogError) {
+      console.warn("[Scanner][StillDiag] Failed to read device scanner server log tail.", serverLogError);
+    }
+  }, []);
+
+  const buildHighQualityDocumentBlob = useCallback(async (
+    source: FrameSource,
+    snapshot: PreviewCaptureSnapshot,
+  ): Promise<HighQualityCaptureArtifact> => {
+    const stillCapture = await source.captureStillFrame();
+    let decodedStillFrame: ImageData;
+    try {
+      decodedStillFrame = await decodeBlobToImageData(stillCapture.file);
+    } catch (error) {
+      await logHighQualityStillFailureDiagnostics(stillCapture, error);
+      const fallbackReason = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to decode high-quality still payload: ${fallbackReason}`);
+    }
+    const previewDimensions = {
+      width: snapshot.frame.width,
+      height: snapshot.frame.height,
+    };
+
+    let selectedStillFrame: ImageData | null = null;
+    let selectedAspectDelta = Number.POSITIVE_INFINITY;
+    let lastCompatibilityReason: string | null = null;
+
+    for (const rotation of STILL_CAPTURE_ROTATION_CANDIDATES) {
+      const candidateFrame = rotation === 0
+        ? decodedStillFrame
+        : rotateImageData(decodedStillFrame, rotation);
+      const compatibility = evaluateFrameMappingCompatibility(previewDimensions, {
+        width: candidateFrame.width,
+        height: candidateFrame.height,
+      });
+
+      if (!compatibility.compatible) {
+        lastCompatibilityReason = compatibility.reason;
+        continue;
+      }
+
+      if (
+        !selectedStillFrame
+        || compatibility.aspectDelta < selectedAspectDelta
+      ) {
+        selectedStillFrame = candidateFrame;
+        selectedAspectDelta = compatibility.aspectDelta;
+      }
+    }
+
+    if (!selectedStillFrame) {
+      throw new Error(
+        lastCompatibilityReason
+          ?? `Preview/still mapping is incompatible (${previewDimensions.width}x${previewDimensions.height} -> ${decodedStillFrame.width}x${decodedStillFrame.height}).`,
+      );
+    }
+
+    const mappedPoints = snapshot.points && snapshot.points.length === 4
+      ? scalePointsBetweenFrames(snapshot.points, previewDimensions, {
+          width: selectedStillFrame.width,
+          height: selectedStillFrame.height,
+        })
+      : null;
+
+    const artifact = await buildDocumentBlob(selectedStillFrame, mappedPoints);
+    return {
+      blob: artifact.blob,
+      frame: artifact.frame,
+      source: stillCapture.source,
+      width: artifact.frame.width,
+      height: artifact.frame.height,
+    };
+  }, [buildDocumentBlob, logHighQualityStillFailureDiagnostics]);
+
+  const assertCaptureBlobPreviewable = useCallback(async (blob: Blob): Promise<void> => {
+    try {
+      await decodeBlobToImageData(blob);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Captured image is not previewable: ${message}`);
+    }
   }, []);
 
   const saveCapturedDocument = useCallback((
     blob: Blob,
     frame: ImageData,
+    captureWidth: number | null,
+    captureHeight: number | null,
     documentDetected: boolean,
+    captureSource: "preview-stream" | "single-hq",
   ) => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const file = new File([blob], `scan_preview_${timestamp}.png`, {
-      type: "image/png",
+    const prefix = captureSource === "single-hq" ? "scan_hq" : "scan_preview";
+    const fileExtension = blob.type === "image/jpeg" ? "jpg" : "png";
+    const fileType = blob.type || (fileExtension === "jpg" ? "image/jpeg" : "image/png");
+    const file = new File([blob], `${prefix}_${timestamp}.${fileExtension}`, {
+      type: fileType,
     });
 
     addCapturedDocument(file);
     setCaptureDebug({
-      lastCaptureSource: "preview-stream",
-      lastCaptureWidth: frame.width,
-      lastCaptureHeight: frame.height,
+      lastCaptureSource: captureSource,
+      lastCaptureWidth: captureWidth ?? frame.width,
+      lastCaptureHeight: captureHeight ?? frame.height,
       lastCaptureAt: Date.now(),
       lastCaptureError: null,
       lastCaptureDocumentDetected: documentDetected,
@@ -678,7 +979,7 @@ export default function ScannerView({
     };
   }, []);
 
-  const captureFromPreview = useCallback(async (
+  const captureDocument = useCallback(async (
     snapshot: PreviewCaptureSnapshot,
     trigger: "manual" | "auto",
   ) => {
@@ -688,6 +989,8 @@ export default function ScannerView({
 
     const captureGeneration = captureCommitGenerationRef.current;
     const { frame, points: sourcePoints } = snapshot;
+    const highQualityCapabilities = frameSourceRef.current?.getState().capabilities;
+    const highQualityEnabled = Boolean(highQualityCapabilities?.highQualityStillCapture);
 
     setProcessingState(true);
     setCaptureCommitPendingState(true);
@@ -695,9 +998,15 @@ export default function ScannerView({
       frame,
       sourcePoints,
       Boolean(sourcePoints && sourcePoints.length === 4),
-      "preview",
+      highQualityEnabled ? "single-hq" : "preview",
       true,
     );
+    setCaptureDebug({
+      highQualityStatus: highQualityEnabled ? "capturing" : "idle",
+      highQualitySource: null,
+      highQualityFallbackReason: null,
+      lastCaptureError: null,
+    });
     toast.info(
       trigger === "auto"
         ? t("toasts.auto-capturing-preview")
@@ -705,14 +1014,85 @@ export default function ScannerView({
     );
 
     try {
-      const blob = await buildDocumentBlob(frame, sourcePoints);
+      const highQualitySource = highQualityEnabled ? frameSourceRef.current : null;
+      let blob: Blob | null = null;
+      let resultFrame = frame;
+      let captureWidth: number | null = frame.width;
+      let captureHeight: number | null = frame.height;
+      let captureSource: "preview-stream" | "single-hq" = "preview-stream";
+      const requiresHighQualitySource = highQualityEnabled;
+
+      if (highQualitySource) {
+        const highQualityAttempts = requiresHighQualitySource ? 2 : 1;
+        let lastHighQualityError: unknown = null;
+
+        for (let attempt = 1; attempt <= highQualityAttempts; attempt += 1) {
+          try {
+            setCaptureDebug({
+              highQualityStatus: "processing",
+              highQualitySource: null,
+              highQualityFallbackReason: null,
+            });
+            const artifact = await buildHighQualityDocumentBlob(highQualitySource, snapshot);
+            blob = artifact.blob;
+            resultFrame = artifact.frame;
+            captureWidth = artifact.width;
+            captureHeight = artifact.height;
+            captureSource = "single-hq";
+            setCaptureDebug({
+              highQualityStatus: "success",
+              highQualitySource: artifact.source,
+              highQualityFallbackReason: null,
+            });
+            lastHighQualityError = null;
+            break;
+          } catch (highQualityError) {
+            lastHighQualityError = highQualityError;
+            if (attempt < highQualityAttempts) {
+              console.warn(`[Scanner] High-quality still capture attempt ${attempt} failed, retrying:`, highQualityError);
+            }
+          }
+        }
+
+        if (lastHighQualityError) {
+          const fallbackReason = lastHighQualityError instanceof Error
+            ? lastHighQualityError.message
+            : String(lastHighQualityError);
+          console.warn("[Scanner] High-quality still capture failed:", lastHighQualityError);
+          setCaptureDebug({
+            highQualityStatus: "error",
+            highQualitySource: null,
+            highQualityFallbackReason: fallbackReason,
+          });
+
+          if (requiresHighQualitySource) {
+            throw new Error(`Scanner capture requires a usable high-quality still source: ${fallbackReason}`);
+          }
+        }
+      }
+
+      if (!blob) {
+        const artifact = await buildDocumentBlob(frame, sourcePoints);
+        blob = artifact.blob;
+        resultFrame = artifact.frame;
+        captureWidth = artifact.frame.width;
+        captureHeight = artifact.frame.height;
+      }
+
+      if (!canCommitCaptureResult(captureGeneration)) {
+        return;
+      }
+      await assertCaptureBlobPreviewable(blob);
       if (!canCommitCaptureResult(captureGeneration)) {
         return;
       }
       saveCapturedDocument(
         blob,
-        frame,
+        resultFrame,
+        captureWidth,
+        captureHeight,
         Boolean(sourcePoints && sourcePoints.length === 4),
+        captureSource,
       );
       toast.success(t("toasts.preview-ready"));
       schedulePreviewCooldown();
@@ -732,6 +1112,8 @@ export default function ScannerView({
     }
   }, [
     buildDocumentBlob,
+    buildHighQualityDocumentBlob,
+    assertCaptureBlobPreviewable,
     canCommitCaptureResult,
     publishCvDebug,
     saveCapturedDocument,
@@ -745,10 +1127,21 @@ export default function ScannerView({
   const startCvLoop = useCallback(() => {
     clearCvLoop();
 
+    const scheduleNextTick = (delayMs: number): void => {
+      if (cvLoopTimeoutRef.current) {
+        clearTimeout(cvLoopTimeoutRef.current);
+      }
+
+      cvLoopTimeoutRef.current = setTimeout(() => {
+        cvLoopTimeoutRef.current = null;
+        tick();
+      }, delayMs);
+    };
+
     const tick = (): void => {
       const frame = latestFrameRef.current;
       if (!frame) {
-        cvLoopTimeoutRef.current = setTimeout(tick, CV_PROCESS_INTERVAL_MS);
+        scheduleNextTick(CV_PROCESS_INTERVAL_MS);
         return;
       }
 
@@ -759,7 +1152,7 @@ export default function ScannerView({
           setIsStable(false);
         });
         publishCvDebug(frame, null, false, "preview", true);
-        cvLoopTimeoutRef.current = setTimeout(tick, CV_PROCESS_INTERVAL_MS);
+        scheduleNextTick(CV_PROCESS_INTERVAL_MS);
         return;
       }
 
@@ -770,65 +1163,98 @@ export default function ScannerView({
         && frameVersion !== lastCvFrameVersionRef.current
       ) {
         cvDetectionInFlightRef.current = true;
+        const processingSize = getCvProcessingSize(frame.width, frame.height);
+        const frameForDetection = frame;
+        const sessionGeneration = frameSourceSessionGenerationRef.current;
+        const detectionStartedAt = performance.now();
 
-        try {
-          const processingSize = getCvProcessingSize(frame.width, frame.height);
-          const detectedPoints = detectDocumentContour(frame, {
-            maxWidth: processingSize.width,
-            maxHeight: processingSize.height,
-          });
-          const stable = trackerRef.current.push(detectedPoints);
-          const now = Date.now();
-          if (!stable || !detectedPoints) {
-            stableSinceRef.current = null;
-          } else {
-            if (stableSinceRef.current === null) {
+        void (async () => {
+          try {
+            const detectedPoints = await detectDocumentContourWithFallback(
+              frameForDetection,
+              frameVersion,
+              processingSize,
+            );
+            if (
+              !dialogOpenRef.current
+              || !isFrameSourceSessionCurrent(sessionGeneration)
+            ) {
+              return;
+            }
+
+            const stable = trackerRef.current.push(detectedPoints);
+            const now = Date.now();
+            if (!stable || !detectedPoints) {
+              stableSinceRef.current = null;
+            } else if (stableSinceRef.current === null) {
               stableSinceRef.current = now;
             }
-          }
 
-          const stableHoldSatisfied = Boolean(
-            stable
-            && detectedPoints
-            && stableSinceRef.current !== null
-            && now - stableSinceRef.current >= AUTO_CAPTURE_STABLE_HOLD_MS,
-          );
-
-          latestCvSnapshotRef.current = {
-            frame,
-            points: clonePoints(detectedPoints),
-          };
-
-          startTransition(() => {
-            setPoints((current) => (pointsEqual(current, detectedPoints) ? current : detectedPoints));
-            setIsStable((current) => (current === stable ? current : stable));
-          });
-          publishCvDebug(frame, detectedPoints, stable, "preview", false, processingSize);
-
-          if (
-            autoCaptureRef.current
-            && stableHoldSatisfied
-            && detectedPoints
-          ) {
-            void captureFromPreview(
-              createCaptureSnapshot(frame, detectedPoints),
-              "auto",
+            const stableHoldSatisfied = Boolean(
+              stable
+              && detectedPoints
+              && stableSinceRef.current !== null
+              && now - stableSinceRef.current >= AUTO_CAPTURE_STABLE_HOLD_MS,
             );
-          }
 
-          lastCvFrameVersionRef.current = frameVersion;
-        } finally {
-          cvDetectionInFlightRef.current = false;
-        }
+            latestCvSnapshotRef.current = {
+              frame: frameForDetection,
+              points: clonePoints(detectedPoints),
+            };
+
+            startTransition(() => {
+              setPoints((current) => (pointsEqual(current, detectedPoints) ? current : detectedPoints));
+              setIsStable((current) => (current === stable ? current : stable));
+            });
+            publishCvDebug(frameForDetection, detectedPoints, stable, "preview", false, processingSize);
+
+            if (
+              autoCaptureRef.current
+              && stableHoldSatisfied
+              && detectedPoints
+            ) {
+              void captureDocument(
+                createCaptureSnapshot(frameForDetection, detectedPoints),
+                "auto",
+              );
+            }
+
+            lastCvFrameVersionRef.current = frameVersion;
+          } catch (error) {
+            if (
+              dialogOpenRef.current
+              && isFrameSourceSessionCurrent(sessionGeneration)
+            ) {
+              console.error("[Scanner] CV detection failed:", error);
+            }
+          } finally {
+            cvDetectionInFlightRef.current = false;
+            if (
+              dialogOpenRef.current
+              && isFrameSourceSessionCurrent(sessionGeneration)
+              && latestFrameVersionRef.current !== frameVersion
+            ) {
+              const elapsedMs = performance.now() - detectionStartedAt;
+              scheduleNextTick(Math.max(0, CV_PROCESS_INTERVAL_MS - elapsedMs));
+            }
+          }
+        })();
       }
 
-      cvLoopTimeoutRef.current = setTimeout(tick, CV_PROCESS_INTERVAL_MS);
+      scheduleNextTick(CV_PROCESS_INTERVAL_MS);
     };
 
-    cvLoopTimeoutRef.current = setTimeout(tick, 0);
-  }, [captureFromPreview, clearCvLoop, createCaptureSnapshot, publishCvDebug]);
+    scheduleNextTick(0);
+  }, [
+    captureDocument,
+    clearCvLoop,
+    createCaptureSnapshot,
+    detectDocumentContourWithFallback,
+    isFrameSourceSessionCurrent,
+    publishCvDebug,
+  ]);
 
-  const renderLoop = useCallback(() => {
+  const drawLatestFrameToCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     const frame = latestFrameRef.current;
 
@@ -864,7 +1290,6 @@ export default function ScannerView({
 
           const frameBufferContext = frameBufferCanvas.getContext("2d");
           if (!frameBufferContext) {
-            animationFrameRef.current = requestAnimationFrame(renderLoop);
             return;
           }
 
@@ -878,9 +1303,22 @@ export default function ScannerView({
         }
       }
     }
-
-    animationFrameRef.current = requestAnimationFrame(renderLoop);
   }, []);
+
+  const schedulePreviewRender = useCallback(() => {
+    if (animationFrameRef.current !== null) {
+      return;
+    }
+
+    animationFrameRef.current = requestAnimationFrame(() => {
+      animationFrameRef.current = null;
+      drawLatestFrameToCanvas();
+
+      if (renderedFrameVersionRef.current !== latestFrameVersionRef.current) {
+        schedulePreviewRender();
+      }
+    });
+  }, [drawLatestFrameToCanvas]);
 
   const handleStart = useCallback(async () => {
     if (!dialogOpenRef.current || unmountedRef.current) {
@@ -969,6 +1407,7 @@ export default function ScannerView({
     setCaptureDebug({
       highQualityStatus: "idle",
       highQualitySource: null,
+      highQualityFallbackReason: null,
       lastCaptureError: null,
       lastCaptureSource: null,
       lastCaptureAt: null,
@@ -1003,6 +1442,7 @@ export default function ScannerView({
 
         latestFrameRef.current = frame;
         latestFrameVersionRef.current += 1;
+        schedulePreviewRender();
       });
 
       source.onError((error: string) => {
@@ -1045,12 +1485,12 @@ export default function ScannerView({
         return;
       }
 
+      void ensureCvWorker();
       setStatus("streaming");
       setConnectionDebug({
         reconnectState: "connected",
         reconnectMessage: t("connection.started"),
       });
-      animationFrameRef.current = requestAnimationFrame(renderLoop);
       startCvLoop();
     } catch (error) {
       if (!source || !isCurrentStartSession(source)) {
@@ -1077,10 +1517,11 @@ export default function ScannerView({
     clearFrameSourceSubscription,
     clearProcessingCooldown,
     clearCvLoop,
+    ensureCvWorker,
     isFrameSourceSessionCurrent,
     invalidatePendingCaptureCommits,
     publishCvDebug,
-    renderLoop,
+    schedulePreviewRender,
     releaseFrameSourceIfCurrent,
     resetDebugState,
     serverJarPath,
@@ -1106,6 +1547,7 @@ export default function ScannerView({
     clearProcessingCooldown();
     clearCvLoop();
     clearFrameSourceSubscription();
+    terminateCvWorker();
 
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
@@ -1175,6 +1617,7 @@ export default function ScannerView({
     setFrameSource,
     setStatus,
     t,
+    terminateCvWorker,
   ]);
 
   // Keep a stable ref so the unmount-only cleanup always calls the latest version.
@@ -1187,7 +1630,7 @@ export default function ScannerView({
   const handlePreviewCapture = useCallback(() => {
     const cvSnapshot = latestCvSnapshotRef.current;
     if (cvSnapshot) {
-      void captureFromPreview(createCaptureSnapshot(
+      void captureDocument(createCaptureSnapshot(
         cvSnapshot.frame,
         cvSnapshot.points,
       ), "manual");
@@ -1199,8 +1642,8 @@ export default function ScannerView({
       return;
     }
 
-    void captureFromPreview(createCaptureSnapshot(frame, null), "manual");
-  }, [captureFromPreview, createCaptureSnapshot]);
+    void captureDocument(createCaptureSnapshot(frame, null), "manual");
+  }, [captureDocument, createCaptureSnapshot]);
 
   const handleRemoveCapturedDocument = useCallback((index: number) => {
     removeCapturedDocument(index);
@@ -1239,7 +1682,10 @@ export default function ScannerView({
   useEffect(() => {
     previewOrientationRef.current = previewOrientation;
     renderedFrameVersionRef.current = 0;
-  }, [previewOrientation]);
+    if (isStreaming) {
+      schedulePreviewRender();
+    }
+  }, [isStreaming, previewOrientation, schedulePreviewRender]);
 
   useEffect(() => {
     autoCaptureRef.current = autoCapture;
@@ -1259,36 +1705,6 @@ export default function ScannerView({
       reset();
     }
   }, [handleStop, invalidatePendingCaptureCommits, isOpen, reset]);
-
-  useEffect(() => {
-    if (!isOpen) {
-      return undefined;
-    }
-
-    const previousConsoleLog = console.log;
-    const interceptedConsoleLog: typeof console.log = (...args) => {
-      previousConsoleLog(...args);
-
-      for (const arg of args) {
-        if (typeof arg !== "string") {
-          continue;
-        }
-
-        const perf = parseFrontendPerfLog(arg);
-        if (perf) {
-          applyPerfSample(perf);
-        }
-      }
-    };
-
-    console.log = interceptedConsoleLog;
-
-    return () => {
-      if (console.log === interceptedConsoleLog) {
-        console.log = previousConsoleLog;
-      }
-    };
-  }, [applyPerfSample, isOpen]);
 
   useEffect(() => {
     // Strict Mode mounts effects twice in development, so reset the ref here
@@ -1471,18 +1887,24 @@ export default function ScannerView({
                       key={`${doc.name}-${index}`}
                       className="group relative shrink-0"
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={capturedPreviewUrls[index]}
-                        alt={t("captured.preview-alt", { index: index + 1 })}
-                        className="h-28 w-24 rounded border bg-background object-cover shadow-sm transition-transform group-hover:scale-105"
-                      />
-                      <button
-                        className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-destructive text-destructive-foreground opacity-0 shadow-md transition-opacity group-hover:opacity-100"
-                        onClick={() => handleRemoveCapturedDocument(index)}
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
+                      {capturedPreviewUrls[index] ? (
+                        <>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={capturedPreviewUrls[index]}
+                            alt={t("captured.preview-alt", { index: index + 1 })}
+                            className="h-28 w-24 rounded border bg-background object-cover shadow-sm transition-transform group-hover:scale-105"
+                          />
+                          <button
+                            className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-destructive text-destructive-foreground opacity-0 shadow-md transition-opacity group-hover:opacity-100"
+                            onClick={() => handleRemoveCapturedDocument(index)}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </>
+                      ) : (
+                        <div className="h-28 w-24 rounded border bg-muted/60 shadow-sm" />
+                      )}
                     </div>
                   ))}
                 </div>

@@ -8,7 +8,7 @@ use std::{
     process::{Command, Output},
     sync::OnceLock,
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 #[cfg(target_os = "windows")]
@@ -21,6 +21,8 @@ static ADB_EXECUTABLE: OnceLock<PathBuf> = OnceLock::new();
 
 const CONNECT_READY_TIMEOUT: Duration = Duration::from_secs(3);
 const CONNECT_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const ADB_SERVER_RECOVERY_RETRY_DELAY: Duration = Duration::from_millis(200);
+const DEVICE_TMP_DIR: &str = "/data/local/tmp";
 const SCANNER_SERVER_PID_PATH: &str = "/data/local/tmp/skid-scanner-server.pid";
 const SCANNER_SERVER_LOG_PATH: &str = "/data/local/tmp/skid-scanner-server.log";
 const STILL_CAPTURE_MAIN_CLASS: &str = "com.skidhomework.server.StillCapture";
@@ -205,9 +207,102 @@ rm -f {pidfile}; \
     )
 }
 
-fn build_still_capture_exec_script(classpath: &str, socket_name: &str) -> String {
-    let capture_args = vec!["--socket".to_string(), socket_name.to_string()];
-    build_app_process_shell_command(classpath, STILL_CAPTURE_MAIN_CLASS, &capture_args)
+fn build_still_capture_to_file_script(
+    classpath: &str,
+    socket_name: &str,
+    output_path: &str,
+) -> String {
+    let capture_args = vec![
+        "--socket".to_string(),
+        socket_name.to_string(),
+        "--output".to_string(),
+        output_path.to_string(),
+    ];
+    let app_process_command =
+        build_app_process_shell_command(classpath, STILL_CAPTURE_MAIN_CLASS, &capture_args);
+
+    format!(
+        "mkdir -p {tmp_dir}; \
+rm -f {output_path}; \
+{app_process_command} >/dev/null",
+        tmp_dir = shell_single_quote(DEVICE_TMP_DIR),
+        output_path = shell_single_quote(output_path),
+    )
+}
+
+fn describe_hex_window(bytes: &[u8], count: usize, from_end: bool) -> String {
+    if bytes.is_empty() {
+        return "∅".to_string();
+    }
+
+    let safe_count = count.max(1).min(bytes.len());
+    let slice = if from_end {
+        &bytes[bytes.len() - safe_count..]
+    } else {
+        &bytes[..safe_count]
+    };
+
+    slice
+        .iter()
+        .map(|value| format!("{value:02x}"))
+        .collect::<Vec<String>>()
+        .join(" ")
+}
+
+fn find_marker_offset(bytes: &[u8], marker_high: u8, marker_low: u8, from_end: bool) -> Option<usize> {
+    if bytes.len() < 2 {
+        return None;
+    }
+
+    if from_end {
+        for index in (0..=(bytes.len() - 2)).rev() {
+            if bytes[index] == marker_high && bytes[index + 1] == marker_low {
+                return Some(index);
+            }
+        }
+        return None;
+    }
+
+    for index in 0..=(bytes.len() - 2) {
+        if bytes[index] == marker_high && bytes[index + 1] == marker_low {
+            return Some(index);
+        }
+    }
+
+    None
+}
+
+fn describe_binary_payload(bytes: &[u8]) -> String {
+    format!(
+        "len={} head=[{}] tail=[{}] first_soi={:?} last_eoi={:?}",
+        bytes.len(),
+        describe_hex_window(bytes, 16, false),
+        describe_hex_window(bytes, 16, true),
+        find_marker_offset(bytes, 0xff, 0xd8, false),
+        find_marker_offset(bytes, 0xff, 0xd9, true),
+    )
+}
+
+fn build_remove_file_shell_script(path: &str) -> String {
+    format!("rm -f {}", shell_single_quote(path))
+}
+
+fn build_remote_still_capture_path(serial: &str) -> String {
+    let sanitized_serial = serial
+        .chars()
+        .map(|value| match value {
+            'a'..='z' | 'A'..='Z' | '0'..='9' => value,
+            _ => '_',
+        })
+        .collect::<String>();
+    let unique_suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+
+    format!(
+        "{DEVICE_TMP_DIR}/skid-scanner-still-{sanitized_serial}-{unique_suffix}.jpg"
+    )
 }
 
 fn build_scanner_server_stop_script(main_class: &str) -> String {
@@ -253,6 +348,79 @@ fn run_adb_command(args: &[String]) -> Result<Output, String> {
         })
 }
 
+fn build_failed_action_error(action: &str, output: &Output) -> String {
+    let details = combine_command_output(output);
+    if details.is_empty() {
+        format!("{action} failed with status {}.", output.status)
+    } else {
+        format!("{action} failed: {details}")
+    }
+}
+
+fn is_adb_server_recoverable_failure(details: &str) -> bool {
+    let normalized = details.to_ascii_lowercase();
+    [
+        "daemon not running",
+        "failed to start daemon",
+        "cannot connect to daemon",
+        "could not read ok from adb server",
+        "failed to check server version",
+    ]
+    .iter()
+    .any(|pattern| normalized.contains(pattern))
+}
+
+fn is_adb_server_management_command(args: &[String]) -> bool {
+    matches!(
+        args.first().map(String::as_str),
+        Some("start-server") | Some("kill-server")
+    )
+}
+
+fn run_adb_management_command(args: &[&str], action: &str) -> Result<Output, String> {
+    let owned_args = args.iter().map(|value| value.to_string()).collect::<Vec<String>>();
+    let output = run_adb_command(&owned_args)?;
+    if output.status.success() {
+        Ok(output)
+    } else {
+        Err(build_failed_action_error(action, &output))
+    }
+}
+
+fn recover_adb_server() -> Result<(), String> {
+    let first_start_error = match run_adb_management_command(&["start-server"], "adb start-server") {
+        Ok(_) => return Ok(()),
+        Err(error) => error,
+    };
+
+    let mut recovery_messages = vec![format!(
+        "Initial adb start-server attempt failed: {first_start_error}"
+    )];
+
+    match run_adb_command(&["kill-server".to_string()]) {
+        Ok(output) if !output.status.success() => {
+            let details = combine_command_output(&output);
+            if !details.is_empty() {
+                recovery_messages.push(format!("adb kill-server reported: {details}"));
+            }
+        }
+        Err(error) => {
+            recovery_messages.push(format!("Failed to launch adb kill-server: {error}"));
+        }
+        Ok(_) => {}
+    }
+
+    thread::sleep(ADB_SERVER_RECOVERY_RETRY_DELAY);
+
+    match run_adb_management_command(&["start-server"], "adb start-server") {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            recovery_messages.push(format!("Retry adb start-server attempt failed: {error}"));
+            Err(recovery_messages.join("\n"))
+        }
+    }
+}
+
 fn run_adb_checked(args: &[String], action: &str) -> Result<Output, String> {
     let output = run_adb_command(args)?;
 
@@ -261,11 +429,28 @@ fn run_adb_checked(args: &[String], action: &str) -> Result<Output, String> {
     }
 
     let details = combine_command_output(&output);
-    if details.is_empty() {
-        Err(format!("{action} failed with status {}.", output.status))
-    } else {
-        Err(format!("{action} failed: {details}"))
+    if !details.is_empty()
+        && !is_adb_server_management_command(args)
+        && is_adb_server_recoverable_failure(&details)
+    {
+        if let Err(recovery_error) = recover_adb_server() {
+            return Err(format!(
+                "{action} failed: {details}\nADB server auto-recovery failed: {recovery_error}"
+            ));
+        }
+
+        let retried_output = run_adb_command(args)?;
+        if retried_output.status.success() {
+            return Ok(retried_output);
+        }
+
+        return Err(build_failed_action_error(
+            &format!("{action} after ADB server auto-recovery"),
+            &retried_output,
+        ));
     }
+
+    Err(build_failed_action_error(action, &output))
 }
 
 fn find_device_attribute(attributes: &[&str], key: &str) -> Option<String> {
@@ -481,33 +666,86 @@ pub async fn tauri_adb_capture_still(
         let serial = ensure_non_empty(&serial, "ADB serial")?;
         let classpath = ensure_non_empty(&classpath, "Server classpath")?;
         let socket_name = ensure_non_empty(&socket_name, "Still capture socket name")?;
-        let shell_command = build_still_capture_exec_script(&classpath, &socket_name);
+        let remote_output_path = build_remote_still_capture_path(&serial);
+        let capture_script =
+            build_still_capture_to_file_script(&classpath, &socket_name, &remote_output_path);
 
-        let args = vec![
+        let capture_args = vec![
             "-s".to_string(),
             serial.clone(),
-            "exec-out".to_string(),
+            "shell".to_string(),
             "sh".to_string(),
             "-c".to_string(),
-            wrap_shell_c_script(&shell_command),
+            wrap_shell_c_script(&capture_script),
         ];
-        let output = run_adb_checked(
-            &args,
-            &format!("adb -s {serial} exec-out sh -c <capture still>"),
-        )?;
 
-        if output.stdout.is_empty() {
-            let details = combine_command_output(&output);
-            if details.is_empty() {
-                return Err(format!("Camera still capture returned no data for {serial}."));
+        let capture_output = run_adb_checked(
+            &capture_args,
+            &format!("adb -s {serial} shell sh -c <capture still to file>"),
+        )?;
+        let capture_details = combine_command_output(&capture_output);
+        if !capture_details.is_empty() {
+            log::info!("[Scanner][StillDiag] Device capture command output for {serial}: {capture_details}");
+        }
+        log::info!(
+            "[Scanner][StillDiag] Device still capture command completed for {serial}; remote path={remote_output_path}"
+        );
+
+        let fetch_result = (|| {
+            let fetch_args = vec![
+                "-s".to_string(),
+                serial.clone(),
+                "exec-out".to_string(),
+                "cat".to_string(),
+                remote_output_path.clone(),
+            ];
+            let output = run_adb_checked(
+                &fetch_args,
+                &format!("adb -s {serial} exec-out cat {remote_output_path}"),
+            )?;
+
+            if output.stdout.is_empty() {
+                let details = combine_command_output(&output);
+                if details.is_empty() {
+                    return Err(format!("Camera still capture returned no data for {serial}."));
+                }
+
+                return Err(format!(
+                    "Camera still capture returned no image bytes for {serial}: {details}"
+                ));
             }
 
-            return Err(format!(
-                "Camera still capture returned no image bytes for {serial}: {details}"
-            ));
-        }
+            log::info!(
+                "[Scanner][StillDiag] Host fetched still payload for {serial}: {}",
+                describe_binary_payload(&output.stdout)
+            );
 
-        Ok(output.stdout)
+            if output.stdout.len() >= 2
+                && !(output.stdout[0] == 0xff && output.stdout[1] == 0xd8)
+            {
+                let text_probe = normalize_text_output(&output.stdout);
+                if !text_probe.is_empty() {
+                    return Err(format!(
+                        "Fetched still payload was not a JPEG for {serial}: {text_probe}"
+                    ));
+                }
+            }
+
+            Ok(output.stdout)
+        })();
+
+        let cleanup_script = build_remove_file_shell_script(&remote_output_path);
+        let cleanup_args = vec![
+            "-s".to_string(),
+            serial.clone(),
+            "shell".to_string(),
+            "sh".to_string(),
+            "-c".to_string(),
+            wrap_shell_c_script(&cleanup_script),
+        ];
+        let _ = run_adb_command(&cleanup_args);
+
+        fetch_result
     })
     .await
     .map_err(|error| format!("ADB still-capture task failed: {error}"))?;

@@ -1,6 +1,8 @@
 package com.skidhomework.server;
 
 import android.annotation.SuppressLint;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraCaptureSession;
@@ -18,6 +20,7 @@ import android.util.Range;
 import android.util.Size;
 import android.view.Surface;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
@@ -40,6 +43,7 @@ public final class CameraCapture {
     private static final long FIRST_CAPTURE_START_TIMEOUT_MS = 1_500L;
     private static final long STILL_CAPTURE_TIMEOUT_MS = 4_000L;
     private static final byte JPEG_QUALITY = (byte) 95;
+    private static final int NORMALIZED_STILL_JPEG_QUALITY = 100;
 
     private final String cameraId;
     private final int width;
@@ -63,6 +67,7 @@ public final class CameraCapture {
     private CameraCharacteristics cameraCharacteristics;
     private ImageReader stillImageReader;
     private Size stillCaptureSize;
+    private int stillJpegOrientation;
 
     public CameraCapture(
             String cameraId,
@@ -162,7 +167,7 @@ public final class CameraCapture {
                     CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
             );
             requestBuilder.set(CaptureRequest.JPEG_QUALITY, JPEG_QUALITY);
-            requestBuilder.set(CaptureRequest.JPEG_ORIENTATION, 0);
+            requestBuilder.set(CaptureRequest.JPEG_ORIENTATION, stillJpegOrientation);
 
             try {
                 activeSession.capture(
@@ -210,7 +215,9 @@ public final class CameraCapture {
                 throw new RuntimeException("still capture returned no image bytes");
             }
 
-            return imageBytes;
+            System.out.println("[StillCapture] Camera still JPEG summary: " + describeImageBytes(imageBytes));
+
+            return normalizeStillJpegForBrowserCompatibility(imageBytes);
         }
     }
 
@@ -297,6 +304,7 @@ public final class CameraCapture {
                 ImageFormat.JPEG,
                 2
         );
+        stillJpegOrientation = resolveStillJpegOrientation();
 
         System.out.println(
                 "[Camera] Opened camera "
@@ -311,6 +319,11 @@ public final class CameraCapture {
                         + "x"
                         + stillCaptureSize.getHeight()
                         + "."
+        );
+        System.out.println(
+                "[Camera] Still JPEG orientation: "
+                        + stillJpegOrientation
+                        + " degrees."
         );
 
         // Create a shared session so preview streaming and still capture use the same camera pipeline.
@@ -660,6 +673,32 @@ public final class CameraCapture {
         stillCaptureSize = null;
     }
 
+    private int resolveStillJpegOrientation() {
+        if (cameraCharacteristics == null || stillCaptureSize == null) {
+            return 0;
+        }
+
+        boolean referenceLandscape = width >= height;
+        boolean stillLandscape = stillCaptureSize.getWidth() >= stillCaptureSize.getHeight();
+        if (referenceLandscape == stillLandscape) {
+            return 0;
+        }
+
+        Integer sensorOrientationValue = cameraCharacteristics.get(
+                CameraCharacteristics.SENSOR_ORIENTATION
+        );
+        if (sensorOrientationValue == null) {
+            return 90;
+        }
+
+        int sensorOrientationDegrees = ((sensorOrientationValue % 360) + 360) % 360;
+        if (sensorOrientationDegrees == 90 || sensorOrientationDegrees == 270) {
+            return sensorOrientationDegrees;
+        }
+
+        return 90;
+    }
+
     private void closeCameraDeviceLocked(CameraDevice camera) {
         try {
             camera.close();
@@ -684,6 +723,134 @@ public final class CameraCapture {
                 image.close();
             }
         }
+    }
+
+    private static byte[] normalizeStillJpegForBrowserCompatibility(byte[] imageBytes) {
+        Bitmap bitmap = null;
+        try {
+            BitmapFactory.Options decodeOptions = new BitmapFactory.Options();
+            decodeOptions.inPreferredConfig = Bitmap.Config.ARGB_8888;
+            decodeOptions.inScaled = false;
+
+            bitmap = BitmapFactory.decodeByteArray(
+                    imageBytes,
+                    0,
+                    imageBytes.length,
+                    decodeOptions
+            );
+            if (bitmap == null) {
+                throw new RuntimeException(
+                        "BitmapFactory could not decode still JPEG payload for browser normalization."
+                );
+            }
+
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream(
+                    Math.max(imageBytes.length, 64 * 1024)
+            );
+            boolean compressed = bitmap.compress(
+                    Bitmap.CompressFormat.JPEG,
+                    NORMALIZED_STILL_JPEG_QUALITY,
+                    outputStream
+            );
+            if (!compressed) {
+                throw new RuntimeException(
+                        "Bitmap.compress returned false while normalizing still JPEG."
+                );
+            }
+
+            byte[] normalizedBytes = outputStream.toByteArray();
+            if (normalizedBytes.length == 0) {
+                throw new RuntimeException("Normalized still JPEG is empty.");
+            }
+
+            System.out.println(
+                    "[StillCapture] Browser-compatible still JPEG summary: "
+                            + describeImageBytes(normalizedBytes)
+                            + " rawLen="
+                            + imageBytes.length
+                            + " normalizedLen="
+                            + normalizedBytes.length
+                            + " bitmap="
+                            + bitmap.getWidth()
+                            + "x"
+                            + bitmap.getHeight()
+                            + "."
+            );
+
+            return normalizedBytes;
+        } catch (OutOfMemoryError error) {
+            System.err.println(
+                    "[StillCapture] Browser-compatible JPEG normalization ran out of memory. rawSummary="
+                            + describeImageBytes(imageBytes)
+            );
+            throw new RuntimeException("Out of memory while normalizing still JPEG.", error);
+        } catch (RuntimeException error) {
+            String message = error.getMessage() == null ? error.toString() : error.getMessage();
+            System.err.println(
+                    "[StillCapture] Browser-compatible JPEG normalization failed: "
+                            + message
+                            + " rawSummary="
+                            + describeImageBytes(imageBytes)
+            );
+            throw error;
+        } finally {
+            if (bitmap != null) {
+                bitmap.recycle();
+            }
+        }
+    }
+
+    private static String describeImageBytes(byte[] bytes) {
+        return "len="
+                + bytes.length
+                + " head=["
+                + describeHexWindow(bytes, 16, false)
+                + "] tail=["
+                + describeHexWindow(bytes, 16, true)
+                + "] firstSOI="
+                + findMarkerOffset(bytes, (byte) 0xff, (byte) 0xd8, false)
+                + " lastEOI="
+                + findMarkerOffset(bytes, (byte) 0xff, (byte) 0xd9, true);
+    }
+
+    private static String describeHexWindow(byte[] bytes, int count, boolean fromEnd) {
+        if (bytes.length == 0) {
+            return "∅";
+        }
+
+        int safeCount = Math.max(1, Math.min(count, bytes.length));
+        int start = fromEnd ? bytes.length - safeCount : 0;
+        int end = start + safeCount;
+        StringBuilder builder = new StringBuilder();
+        for (int index = start; index < end; index++) {
+            if (builder.length() > 0) {
+                builder.append(' ');
+            }
+            builder.append(String.format("%02x", bytes[index] & 0xff));
+        }
+        return builder.toString();
+    }
+
+    private static Integer findMarkerOffset(byte[] bytes, byte high, byte low, boolean fromEnd) {
+        if (bytes.length < 2) {
+            return null;
+        }
+
+        if (fromEnd) {
+            for (int index = bytes.length - 2; index >= 0; index--) {
+                if (bytes[index] == high && bytes[index + 1] == low) {
+                    return index;
+                }
+            }
+            return null;
+        }
+
+        for (int index = 0; index < bytes.length - 1; index++) {
+            if (bytes[index] == high && bytes[index + 1] == low) {
+                return index;
+            }
+        }
+        return null;
     }
 
     /**

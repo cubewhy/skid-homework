@@ -20,6 +20,12 @@ export interface TauriAdbPairRequest {
   pairingCode: string;
 }
 
+export interface TauriAdbStillPayload {
+  mimeType: string;
+  bytes: Uint8Array;
+  transport: "raw-ipc";
+}
+
 const invokeTauriCommand = async <T>(
   command: string,
   payload?: Record<string, unknown>,
@@ -77,11 +83,17 @@ export const captureTauriAdbStill = (
   serial: string,
   classpath: string,
   socketName: string,
-): Promise<Uint8Array> => {
+): Promise<TauriAdbStillPayload> => {
   return invokeTauriBinaryCommand("tauri_adb_capture_still", {
     serial,
     classpath,
     socketName,
+  }).then((bytes) => {
+    return {
+      mimeType: "image/jpeg",
+      bytes,
+      transport: "raw-ipc",
+    };
   });
 };
 

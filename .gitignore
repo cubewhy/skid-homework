@@ -53,6 +53,8 @@ out
 src-tauri/target
 /server/.gradle/
 /server/build/
+outputs
+docs
 
 #scripts
 scripts
