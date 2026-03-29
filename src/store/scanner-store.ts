@@ -6,6 +6,7 @@ import type {FrameSource, Point, ScannerConfig} from "@/lib/scanner";
  */
 
 export type ScannerStatus = "idle" | "connecting" | "streaming" | "error";
+export type ScannerCapturedDocumentStatus = "processing" | "ready" | "failed";
 export type ScannerReconnectState =
   | "idle"
   | "connecting"
@@ -113,6 +114,31 @@ export interface ScannerCaptureDebugState {
   lastCaptureDocumentDetected: boolean;
 }
 
+export interface ScannerCapturedDocument {
+  /** Stable identifier for UI updates and post-processing. */
+  id: string;
+  /** Current export file; becomes the processed output once ready. */
+  file: File;
+  /** Original captured image used for manual recropping. */
+  sourceFile: File;
+  /** Current ordered corner points in source-image coordinates. */
+  points: Point[] | null;
+  /** Async post-processing state. */
+  status: ScannerCapturedDocumentStatus;
+  /** Latest post-processing error, if any. */
+  error: string | null;
+  /** Whether the original capture had a detected contour. */
+  documentDetected: boolean;
+  /** Capture transport used for this document. */
+  captureSource: "preview-stream" | "single-hq";
+  /** Natural source-image width. */
+  sourceWidth: number;
+  /** Natural source-image height. */
+  sourceHeight: number;
+  /** Stable filename prefix for regenerated outputs. */
+  outputNameBase: string;
+}
+
 export interface ScannerState {
   /** Current scanner lifecycle status. */
   status: ScannerStatus;
@@ -125,7 +151,7 @@ export interface ScannerState {
   /** Number of frames received in current session. */
   frameCount: number;
   /** Captured document images ready to send to AI. */
-  capturedDocuments: File[];
+  capturedDocuments: ScannerCapturedDocument[];
   /** Transport and preview debug metrics. */
   previewDebug: ScannerPreviewDebugState;
   /** CV detection debug metrics. */
@@ -141,8 +167,12 @@ export interface ScannerState {
   setConfig: (config: ScannerConfig | null) => void;
   incrementFrameCount: () => void;
   resetFrameCount: () => void;
-  addCapturedDocument: (doc: File) => void;
-  removeCapturedDocument: (index: number) => void;
+  addCapturedDocument: (doc: ScannerCapturedDocument) => void;
+  updateCapturedDocument: (
+    id: string,
+    updates: Partial<ScannerCapturedDocument>,
+  ) => void;
+  removeCapturedDocument: (id: string) => void;
   clearCapturedDocuments: () => void;
   setPreviewDebug: (patch: Partial<ScannerPreviewDebugState>) => void;
   setCvDebug: (patch: Partial<ScannerCvDebugState>) => void;
@@ -298,9 +328,24 @@ export const useScannerStore = create<ScannerState>((set) => ({
       capturedDocuments: [...state.capturedDocuments, doc],
     })),
 
-  removeCapturedDocument: (index) =>
+  updateCapturedDocument: (id, updates) =>
+    set((state) => {
+      let didChange = false;
+      const capturedDocuments = state.capturedDocuments.map((document) => {
+        if (document.id !== id) {
+          return document;
+        }
+
+        didChange = true;
+        return { ...document, ...updates };
+      });
+
+      return didChange ? { capturedDocuments } : state;
+    }),
+
+  removeCapturedDocument: (id) =>
     set((state) => ({
-      capturedDocuments: state.capturedDocuments.filter((_, i) => i !== index),
+      capturedDocuments: state.capturedDocuments.filter((document) => document.id !== id),
     })),
 
   clearCapturedDocuments: () =>

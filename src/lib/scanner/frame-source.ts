@@ -8,6 +8,7 @@
 
 import {
   captureTauriAdbStill,
+  captureTauriAdbStillStream,
   forwardTauriAdbPort,
   pushTauriAdbFile,
   removeForwardTauriAdbPort,
@@ -191,12 +192,25 @@ export const DEFAULT_SCANNER_CONFIG: Omit<ScannerConfig, "serial" | "serverJarPa
 
 const SERVER_MAIN_CLASS = "com.skidhomework.server.Server";
 const STILL_CAPTURE_SOCKET_SUFFIX = "-still";
+const STILL_STREAM_SOCKET_SUFFIX = "-still-stream";
+const STILL_FORWARD_PORT_OFFSET = 1000;
 const DECODE_RESTART_DELAY_MS = 125;
 const WATCHDOG_INTERVAL_MS = 1000;
 const STARTUP_FRAME_GRACE_MS = 9000;
 
 const getStillCaptureSocketName = (socketName: string): string => {
   return `${socketName}${STILL_CAPTURE_SOCKET_SUFFIX}`;
+};
+
+const getStillStreamSocketName = (socketName: string): string => {
+  return `${socketName}${STILL_STREAM_SOCKET_SUFFIX}`;
+};
+
+const buildStillForwardPreferredPort = (previewPort: number): number => {
+  const basePort = Number.isInteger(previewPort) && previewPort > 0
+    ? previewPort
+    : DEFAULT_SCANNER_CONFIG.localPort;
+  return Math.min(MAX_TCP_PORT, Math.max(1, basePort + STILL_FORWARD_PORT_OFFSET));
 };
 
 const JPEG_SOI_MARKER = 0xffd8;
@@ -965,6 +979,7 @@ export class TauriNativeFrameSource implements FrameSource {
   private streamActive = false;
   private previewPauseDepth = 0;
   private forwardActive = false;
+  private stillForwardActive = false;
   private serverRunning = false;
   private decoderRunning = false;
   private eventListenersReady = false;
@@ -977,9 +992,11 @@ export class TauriNativeFrameSource implements FrameSource {
   private recoveryErrorReported = false;
   private streamStartedAt: number | null = null;
   private decodeTargetRgba: Uint8ClampedArray | null = null;
+  private stillLocalPort: number;
 
   constructor(config: ScannerConfig) {
     this.config = config;
+    this.stillLocalPort = buildStillForwardPreferredPort(config.localPort);
   }
 
   onFrame(callback: FrameCallback): void {
@@ -1049,11 +1066,31 @@ export class TauriNativeFrameSource implements FrameSource {
     const capturedAt = nowMs();
     this.pausePreviewDelivery();
     try {
-      const stillPayload = await captureTauriAdbStill(
-        this.config.serial,
-        this.config.remoteJarPath,
-        getStillCaptureSocketName(this.config.socketName),
-      );
+      let stillPayload = null;
+      if (!this.stillForwardActive) {
+        try {
+          await this.ensureStillForward();
+        } catch (error) {
+          console.warn("[Scanner][StillPerf] Failed to establish still-stream forward, falling back:", error);
+        }
+      }
+
+      if (this.stillForwardActive) {
+        try {
+          stillPayload = await captureTauriAdbStillStream(this.stillLocalPort);
+        } catch (error) {
+          await this.invalidateStillForward();
+          console.warn("[Scanner][StillPerf] Forwarded still-stream capture failed, falling back:", error);
+        }
+      }
+
+      if (!stillPayload) {
+        stillPayload = await captureTauriAdbStill(
+          this.config.serial,
+          this.config.remoteJarPath,
+          getStillCaptureSocketName(this.config.socketName),
+        );
+      }
       const stillBytes = stillPayload.mimeType === "image/jpeg"
         ? extractJpegPayload(stillPayload.bytes)
         : stillPayload.bytes;
@@ -1221,6 +1258,7 @@ export class TauriNativeFrameSource implements FrameSource {
     return [
       "--socket", this.config.socketName,
       "--still-socket", getStillCaptureSocketName(this.config.socketName),
+      "--still-stream-socket", getStillStreamSocketName(this.config.socketName),
       "--width", String(this.config.width),
       "--height", String(this.config.height),
       "--bitrate", String(this.config.bitrate),
@@ -1273,6 +1311,67 @@ export class TauriNativeFrameSource implements FrameSource {
     }
 
     throw lastError instanceof Error ? lastError : new Error(toErrorMessage(lastError));
+  }
+
+  private async ensureStillForward(): Promise<void> {
+    if (this.stillForwardActive) {
+      return;
+    }
+
+    const preferredPort = this.stillLocalPort;
+    const candidates = buildForwardPortCandidates(preferredPort);
+    let bindFailureSeen = false;
+    let lastError: unknown = null;
+
+    for (const candidatePort of candidates) {
+      try {
+        await forwardTauriAdbPort(
+          this.config.serial,
+          candidatePort,
+          getStillStreamSocketName(this.config.socketName),
+        );
+        this.stillLocalPort = candidatePort;
+        this.stillForwardActive = true;
+
+        if (bindFailureSeen && candidatePort !== preferredPort) {
+          console.warn(
+            `[Scanner] Preferred local still-stream forward port ${preferredPort} was unavailable; switched still transport to ${candidatePort}.`,
+          );
+        }
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!isLocalForwardBindError(error) || candidatePort === candidates[candidates.length - 1]) {
+          throw error;
+        }
+        bindFailureSeen = true;
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error(toErrorMessage(lastError));
+  }
+
+  private async ensureStillForwardBestEffort(): Promise<void> {
+    try {
+      await this.ensureStillForward();
+    } catch (error) {
+      this.stillForwardActive = false;
+      console.warn(
+        "[Scanner] Still-stream forward is unavailable; continuing with one-shot still fallback.",
+        error,
+      );
+    }
+  }
+
+  private async invalidateStillForward(): Promise<void> {
+    const stillLocalPort = this.stillLocalPort;
+    this.stillForwardActive = false;
+
+    try {
+      await removeForwardTauriAdbPort(this.config.serial, stillLocalPort);
+    } catch {
+      // Ignore stale forward cleanup failures so still capture can fall back immediately.
+    }
   }
 
   private async ensureServerRunning(): Promise<void> {
@@ -1364,6 +1463,7 @@ export class TauriNativeFrameSource implements FrameSource {
           removeForward: true,
         });
         await this.ensureForward();
+        await this.ensureStillForwardBestEffort();
         await this.ensureDecodeStream();
         return;
       case "server-restart":
@@ -1380,6 +1480,7 @@ export class TauriNativeFrameSource implements FrameSource {
       case "cold-start":
       default:
         await this.ensureForward();
+        await this.ensureStillForwardBestEffort();
         await this.ensureServerRunning();
         await this.ensureDecodeStream();
         return;
@@ -1749,6 +1850,7 @@ export class TauriNativeFrameSource implements FrameSource {
 
   private async cleanupTransport(options: CleanupTransportOptions): Promise<void> {
     const { serial, remoteJarPath, localPort } = this.config;
+    const stillLocalPort = this.stillLocalPort;
     this.streamActive = false;
     this.clearTimers();
     this.suppressUnexpectedEvents(RECOVERY_EVENT_SUPPRESSION_MS);
@@ -1773,6 +1875,12 @@ export class TauriNativeFrameSource implements FrameSource {
         // Ignore forward removal errors so recovery can proceed.
       }
       this.forwardActive = false;
+      try {
+        await removeForwardTauriAdbPort(serial, stillLocalPort);
+      } catch {
+        // Ignore still forward removal errors so recovery can proceed.
+      }
+      this.stillForwardActive = false;
     }
   }
 

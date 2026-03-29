@@ -320,7 +320,12 @@
       "description": "预览采集结果会汇总在这里，便于检查和发送。",
       "item-count": "{{count}} 项",
       "item-count_plural": "{{count}} 项",
-      "preview-alt": "已捕获文档 {{index}}"
+      "preview-alt": "已捕获文档 {{index}}",
+      "status": {
+        "processing": "后处理中",
+        "ready": "点击调整",
+        "failed": "处理失败"
+      }
     },
     "connection": {
       "recovering": "正在恢复预览流...",
@@ -341,10 +346,25 @@
       "capturing-preview": "正在从预览采集...",
       "preview-ready": "预览采集已完成。",
       "preview-failed": "预览采集失败：{{message}}",
+      "post-process-failed": "文档后处理失败：{{message}}",
+      "post-processing-pending": "还有 {{count}} 个已捕获文档在后处理中。",
+      "post-processing-blocked": "有 {{count}} 个已捕获文档后处理失败，请调整或删除后再发送。",
       "no-device": "没有可用的 ADB 设备，请先连接设备。",
       "server-jar-missing": "无法定位 camera-server.jar 资源。",
       "start-failed": "启动扫描器失败：{{message}}",
       "no-documents": "还没有采集到任何文档。"
+    },
+    "editor": {
+      "title": "调整文档四角",
+      "description": "拖动四个角点对齐文档边缘，然后重新裁切。",
+      "image-alt": "已捕获文档原图",
+      "hint": "提示：把手柄尽量贴合纸张真实四角，再点击应用。",
+      "actions": {
+        "reset": "重置",
+        "cancel": "取消",
+        "apply": "应用裁切",
+        "applying": "应用中..."
+      }
     },
     "controls": {
       "title": "实时预览控制",
@@ -915,7 +935,8 @@
   "sources": {
     "upload": "本地上传",
     "camera": "拍摄",
-    "adb": "ADB"
+    "adb": "ADB",
+    "scanner": "扫描器"
   },
   "ai-client": {
     "openai": {

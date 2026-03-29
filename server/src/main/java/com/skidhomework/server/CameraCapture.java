@@ -21,6 +21,8 @@ import android.util.Size;
 import android.view.Surface;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
@@ -104,6 +106,19 @@ public final class CameraCapture {
      * Capture a single high-resolution JPEG from the active camera session.
      */
     public byte[] captureStillJpeg() throws Exception {
+        byte[] imageBytes = captureRawStillJpeg();
+        return normalizeStillJpegForBrowserCompatibility(imageBytes);
+    }
+
+    /**
+     * Capture and stream a browser-compatible high-resolution JPEG directly to the supplied output.
+     */
+    public void streamStillJpeg(OutputStream outputStream) throws Exception {
+        byte[] imageBytes = captureRawStillJpeg();
+        writeNormalizedStillJpegForBrowserCompatibility(imageBytes, outputStream);
+    }
+
+    private byte[] captureRawStillJpeg() throws Exception {
         synchronized (stillCaptureLock) {
             if (stopping.get()) {
                 throw new IllegalStateException("Camera pipeline is stopping.");
@@ -217,7 +232,7 @@ public final class CameraCapture {
 
             System.out.println("[StillCapture] Camera still JPEG summary: " + describeImageBytes(imageBytes));
 
-            return normalizeStillJpegForBrowserCompatibility(imageBytes);
+            return imageBytes;
         }
     }
 
@@ -726,6 +741,29 @@ public final class CameraCapture {
     }
 
     private static byte[] normalizeStillJpegForBrowserCompatibility(byte[] imageBytes) {
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream(
+                Math.max(imageBytes.length, 64 * 1024)
+        );
+        final long normalizedLength;
+        try {
+            normalizedLength = writeNormalizedStillJpegForBrowserCompatibility(imageBytes, outputStream);
+        } catch (IOException error) {
+            throw new RuntimeException(
+                    "I/O failure while normalizing still JPEG for browser compatibility.",
+                    error
+            );
+        }
+        byte[] normalizedBytes = outputStream.toByteArray();
+        if (normalizedBytes.length == 0 || normalizedLength == 0) {
+            throw new RuntimeException("Normalized still JPEG is empty.");
+        }
+        return normalizedBytes;
+    }
+
+    private static long writeNormalizedStillJpegForBrowserCompatibility(
+            byte[] imageBytes,
+            OutputStream outputStream
+    ) throws IOException {
         Bitmap bitmap = null;
         try {
             BitmapFactory.Options decodeOptions = new BitmapFactory.Options();
@@ -744,13 +782,11 @@ public final class CameraCapture {
                 );
             }
 
-            ByteArrayOutputStream outputStream = new ByteArrayOutputStream(
-                    Math.max(imageBytes.length, 64 * 1024)
-            );
+            CountingOutputStream countingOutputStream = new CountingOutputStream(outputStream);
             boolean compressed = bitmap.compress(
                     Bitmap.CompressFormat.JPEG,
                     NORMALIZED_STILL_JPEG_QUALITY,
-                    outputStream
+                    countingOutputStream
             );
             if (!compressed) {
                 throw new RuntimeException(
@@ -758,18 +794,20 @@ public final class CameraCapture {
                 );
             }
 
-            byte[] normalizedBytes = outputStream.toByteArray();
-            if (normalizedBytes.length == 0) {
+            countingOutputStream.flush();
+            long normalizedLength = countingOutputStream.getBytesWritten();
+            if (normalizedLength == 0) {
                 throw new RuntimeException("Normalized still JPEG is empty.");
             }
 
             System.out.println(
                     "[StillCapture] Browser-compatible still JPEG summary: "
-                            + describeImageBytes(normalizedBytes)
+                            + " rawSummary="
+                            + describeImageBytes(imageBytes)
                             + " rawLen="
                             + imageBytes.length
                             + " normalizedLen="
-                            + normalizedBytes.length
+                            + normalizedLength
                             + " bitmap="
                             + bitmap.getWidth()
                             + "x"
@@ -777,7 +815,7 @@ public final class CameraCapture {
                             + "."
             );
 
-            return normalizedBytes;
+            return normalizedLength;
         } catch (OutOfMemoryError error) {
             System.err.println(
                     "[StillCapture] Browser-compatible JPEG normalization ran out of memory. rawSummary="
@@ -797,6 +835,42 @@ public final class CameraCapture {
             if (bitmap != null) {
                 bitmap.recycle();
             }
+        }
+    }
+
+    private static final class CountingOutputStream extends OutputStream {
+        private final OutputStream delegate;
+        private long bytesWritten = 0L;
+
+        CountingOutputStream(OutputStream delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void write(int b) throws IOException {
+            delegate.write(b);
+            bytesWritten += 1L;
+        }
+
+        @Override
+        public void write(byte[] b) throws IOException {
+            delegate.write(b);
+            bytesWritten += b.length;
+        }
+
+        @Override
+        public void write(byte[] b, int off, int len) throws IOException {
+            delegate.write(b, off, len);
+            bytesWritten += len;
+        }
+
+        @Override
+        public void flush() throws IOException {
+            delegate.flush();
+        }
+
+        long getBytesWritten() {
+            return bytesWritten;
         }
     }
 

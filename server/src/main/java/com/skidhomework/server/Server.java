@@ -25,6 +25,7 @@ public final class Server {
 
     private static final String DEFAULT_SOCKET_NAME = "scanner";
     private static final String DEFAULT_STILL_SOCKET_SUFFIX = "-still";
+    private static final String DEFAULT_STILL_STREAM_SOCKET_SUFFIX = "-still-stream";
     private static final int DEFAULT_WIDTH = 640;
     private static final int DEFAULT_HEIGHT = 360;
     private static final int DEFAULT_BITRATE = 2_000_000; // 2 Mbps
@@ -47,6 +48,7 @@ public final class Server {
         System.out.println("[Server] Starting camera server...");
         System.out.println("[Server] Socket: " + config.socketName);
         System.out.println("[Server] Still socket: " + config.stillSocketName);
+        System.out.println("[Server] Still stream socket: " + config.stillStreamSocketName);
         System.out.println("[Server] Resolution: " + config.width + "x" + config.height);
         System.out.println("[Server] Bitrate: " + config.bitrate + ", FPS: " + config.framerate);
         System.out.println("[Server] Camera: " + config.cameraId);
@@ -57,6 +59,7 @@ public final class Server {
         AtomicReference<CameraCapture> activeCaptureRef = new AtomicReference<>();
         SocketRelay relay = null;
         StillCaptureSocketServer stillCaptureServer = null;
+        StillCaptureStreamSocketServer stillCaptureStreamServer = null;
         AtomicBoolean shutdownRequested = new AtomicBoolean(false);
         AtomicReference<StopSignal> activeStopSignal = new AtomicReference<>();
         AtomicReference<StopReason> terminalStopReason = new AtomicReference<>();
@@ -120,6 +123,17 @@ public final class Server {
                     }
             );
             stillCaptureServer.start();
+            stillCaptureStreamServer = new StillCaptureStreamSocketServer(
+                    config.stillStreamSocketName,
+                    (streamOutput) -> {
+                        CameraCapture activeCapture = activeCaptureRef.get();
+                        if (activeCapture == null) {
+                            throw new IllegalStateException("Camera session is not ready for streamed still capture.");
+                        }
+                        activeCapture.streamStillJpeg(streamOutput);
+                    }
+            );
+            stillCaptureStreamServer.start();
 
             StopReason lastReason = runStreamingLoop(
                     config,
@@ -142,6 +156,9 @@ public final class Server {
         } finally {
             if (stillCaptureServer != null) {
                 stillCaptureServer.close();
+            }
+            if (stillCaptureStreamServer != null) {
+                stillCaptureStreamServer.close();
             }
             SocketRelay activeRelay = relayRef.getAndSet(null);
             if (activeRelay != null) {
@@ -381,6 +398,9 @@ public final class Server {
                 case "--still-socket":
                     config.stillSocketName = args[++i];
                     break;
+                case "--still-stream-socket":
+                    config.stillStreamSocketName = args[++i];
+                    break;
                 case "--height":
                     config.height = Integer.parseInt(args[++i]);
                     break;
@@ -402,6 +422,9 @@ public final class Server {
         if (config.stillSocketName == null || config.stillSocketName.trim().isEmpty()) {
             config.stillSocketName = defaultStillSocketName(config.socketName);
         }
+        if (config.stillStreamSocketName == null || config.stillStreamSocketName.trim().isEmpty()) {
+            config.stillStreamSocketName = defaultStillStreamSocketName(config.socketName);
+        }
 
         return config;
     }
@@ -409,6 +432,7 @@ public final class Server {
     private static final class ServerConfig {
         String socketName = DEFAULT_SOCKET_NAME;
         String stillSocketName = defaultStillSocketName(DEFAULT_SOCKET_NAME);
+        String stillStreamSocketName = defaultStillStreamSocketName(DEFAULT_SOCKET_NAME);
         int width = DEFAULT_WIDTH;
         int height = DEFAULT_HEIGHT;
         int bitrate = DEFAULT_BITRATE;
@@ -418,6 +442,10 @@ public final class Server {
 
     private static String defaultStillSocketName(String previewSocketName) {
         return previewSocketName + DEFAULT_STILL_SOCKET_SUFFIX;
+    }
+
+    private static String defaultStillStreamSocketName(String previewSocketName) {
+        return previewSocketName + DEFAULT_STILL_STREAM_SOCKET_SUFFIX;
     }
 
     private static void closeQuietly(LocalSocket socket) {

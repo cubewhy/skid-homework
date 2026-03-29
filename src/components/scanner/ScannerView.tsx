@@ -12,6 +12,7 @@ import {
   createFrameSource,
   DEFAULT_SCANNER_CONFIG,
   detectDocumentContour,
+  enhanceDocumentImage,
   evaluateFrameMappingCompatibility,
   type FrameSource,
   type FrameSourceState,
@@ -27,10 +28,13 @@ import {isOpenCvReady} from "@/lib/scanner/opencv-runtime";
 import {orientPointsForPreview} from "@/lib/scanner/preview-orientation";
 import {shellTauriAdbCommand} from "@/lib/tauri/adb";
 import {getSelectedDesktopAdbSerial} from "@/lib/webadb/screenshot";
-import {useScannerStore} from "@/store/scanner-store";
+import {useBlobDataUrl} from "@/hooks/use-blob-data-url";
+import {useSettingsStore} from "@/store/settings-store";
+import {type ScannerCapturedDocument, useScannerStore} from "@/store/scanner-store";
 import {cn} from "@/lib/utils";
 
 import OpenCVLoader from "../OpenCVLoader";
+import {ScannerCapturedDocumentEditor} from "./ScannerCapturedDocumentEditor";
 import {ScannerControls} from "./ScannerControls";
 import {ScannerCvDebugCard, ScannerDebugPanel, ScannerPreviewDebugCard,} from "./ScannerDebugPanel";
 import {ScannerOverlay} from "./ScannerOverlay";
@@ -56,17 +60,11 @@ interface PreviewCaptureSnapshot {
   points: Point[] | null;
 }
 
-interface HighQualityCaptureArtifact {
-  blob: Blob;
+interface PreparedCaptureArtifact {
+  sourceBlob: Blob;
   frame: ImageData;
-  source: string;
-  width: number | null;
-  height: number | null;
-}
-
-interface DocumentCaptureArtifact {
-  blob: Blob;
-  frame: ImageData;
+  points: Point[] | null;
+  source?: string;
 }
 
 type OptionalDebugFrameSource = FrameSource & {
@@ -93,10 +91,6 @@ const cloneFrame = (frame: ImageData): ImageData => {
 
 const clonePoints = (points: Point[] | null): Point[] | null => {
   return points?.map((point) => ({ ...point })) ?? null;
-};
-
-const getCapturedDocumentCacheKey = (file: File): string => {
-  return `${file.name}:${file.size}:${file.lastModified}:${file.type}`;
 };
 
 const describeHexWindow = (bytes: Uint8Array, count: number, fromEnd: boolean = false): string => {
@@ -284,6 +278,68 @@ const pointsEqual = (left: Point[] | null, right: Point[] | null): boolean => {
   ));
 };
 
+interface ScannerCapturedDocumentThumbnailProps {
+  document: ScannerCapturedDocument;
+  index: number;
+  onEdit: (documentId: string) => void;
+  onRemove: (documentId: string) => void;
+  previewAlt: string;
+  statusLabel: string;
+}
+
+function ScannerCapturedDocumentThumbnail({
+  document,
+  index,
+  onEdit,
+  onRemove,
+  previewAlt,
+  statusLabel,
+}: ScannerCapturedDocumentThumbnailProps) {
+  const previewUrl = useBlobDataUrl(document.file);
+
+  return (
+    <div
+      key={document.id}
+      className="group relative shrink-0"
+    >
+      <button
+        type="button"
+        onClick={() => onEdit(document.id)}
+        className="relative block overflow-hidden rounded border bg-background shadow-sm transition-transform group-hover:scale-[1.02]"
+      >
+        {previewUrl ? (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={previewUrl}
+              alt={previewAlt}
+              className="h-28 w-24 object-cover"
+            />
+          </>
+        ) : (
+          <div className="h-28 w-24 bg-muted/40" />
+        )}
+        <div className="absolute inset-x-0 bottom-0 bg-black/60 px-2 py-1 text-left text-[10px] font-medium text-white">
+          {statusLabel}
+        </div>
+        {document.status === "processing" ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/35">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+          </div>
+        ) : null}
+      </button>
+      <button
+        type="button"
+        className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-destructive text-destructive-foreground opacity-0 shadow-md transition-opacity group-hover:opacity-100"
+        onClick={() => onRemove(document.id)}
+        aria-label={`Remove captured document ${index + 1}`}
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
+
 /**
  * Live camera scanner dialog component.
  *
@@ -322,7 +378,9 @@ export default function ScannerView({
   const captureCommitPendingRef = useRef(false);
   const stableSinceRef = useRef<number | null>(null);
   const autoCaptureRef = useRef(true);
-  const capturedPreviewUrlCacheRef = useRef<Map<string, string>>(new Map());
+  const capturedDocumentProcessVersionsRef = useRef<Map<string, number>>(new Map());
+  const capturedDocumentQueueGenerationRef = useRef(0);
+  const capturedDocumentQueueRef = useRef<Promise<void>>(Promise.resolve());
   const trackerRef = useRef<StabilityTracker>(
     new StabilityTracker(AUTO_CAPTURE_STABLE_FRAMES, AUTO_CAPTURE_VARIANCE_THRESHOLD),
   );
@@ -333,9 +391,10 @@ export default function ScannerView({
   const [autoCapture, setAutoCapture] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isCaptureCommitPending, setIsCaptureCommitPending] = useState(false);
-  const [capturedPreviewUrls, setCapturedPreviewUrls] = useState<string[]>([]);
+  const [editingCapturedDocumentId, setEditingCapturedDocumentId] = useState<string | null>(null);
   const [previewOrientation, setPreviewOrientation] = useState<"landscape" | "portrait">("landscape");
   const { t } = useTranslation("commons", { keyPrefix: "document-scanner" });
+  const imageEnhancement = useSettingsStore((state) => state.imageEnhancement);
 
   const status = useScannerStore((state) => state.status);
   const errorMessage = useScannerStore((state) => state.errorMessage);
@@ -347,6 +406,7 @@ export default function ScannerView({
   const setFrameSource = useScannerStore((state) => state.setFrameSource);
   const setConfig = useScannerStore((state) => state.setConfig);
   const addCapturedDocument = useScannerStore((state) => state.addCapturedDocument);
+  const updateCapturedDocument = useScannerStore((state) => state.updateCapturedDocument);
   const removeCapturedDocument = useScannerStore((state) => state.removeCapturedDocument);
   const clearCapturedDocuments = useScannerStore((state) => state.clearCapturedDocuments);
   const setPreviewDebug = useScannerStore((state) => state.setPreviewDebug);
@@ -365,40 +425,22 @@ export default function ScannerView({
 
     return `${previewWidth} × ${previewHeight}`;
   }, [previewHeight, previewWidth]);
-
-  useEffect(() => {
-    const activeKeys = new Set<string>();
-    const nextUrls = capturedDocuments.map((file) => {
-      const key = getCapturedDocumentCacheKey(file);
-      activeKeys.add(key);
-
-      let url = capturedPreviewUrlCacheRef.current.get(key);
-      if (!url) {
-        url = URL.createObjectURL(file);
-        capturedPreviewUrlCacheRef.current.set(key, url);
-      }
-
-      return url;
-    });
-
-    for (const [key, url] of capturedPreviewUrlCacheRef.current.entries()) {
-      if (!activeKeys.has(key)) {
-        URL.revokeObjectURL(url);
-        capturedPreviewUrlCacheRef.current.delete(key);
-      }
+  const editingCapturedDocument = useMemo(() => {
+    if (!editingCapturedDocumentId) {
+      return null;
     }
 
-    setCapturedPreviewUrls(nextUrls);
-  }, [capturedDocuments]);
+    return capturedDocuments.find((document) => document.id === editingCapturedDocumentId) ?? null;
+  }, [capturedDocuments, editingCapturedDocumentId]);
 
   useEffect(() => {
-    return () => {
-      for (const url of capturedPreviewUrlCacheRef.current.values()) {
-        URL.revokeObjectURL(url);
-      }
-      capturedPreviewUrlCacheRef.current.clear();
-    };
-  }, []);
+    if (
+      editingCapturedDocumentId
+      && !capturedDocuments.some((document) => document.id === editingCapturedDocumentId)
+    ) {
+      setEditingCapturedDocumentId(null);
+    }
+  }, [capturedDocuments, editingCapturedDocumentId]);
 
   const clearProcessingCooldown = useCallback(() => {
     if (processingCooldownRef.current) {
@@ -796,10 +838,10 @@ export default function ScannerView({
     maybeDebugSource.onPerformanceState?.(applyGuardedPayload);
   }, [applyFutureDebugPayload]);
 
-  const buildDocumentBlob = useCallback(async (
+  const buildDocumentSourceArtifact = useCallback(async (
     frame: ImageData,
     documentPoints: Point[] | null,
-  ): Promise<DocumentCaptureArtifact> => {
+  ): Promise<PreparedCaptureArtifact> => {
     const exportOrientation = previewOrientationRef.current;
     const exportFrame = exportOrientation === "portrait"
       ? rotateImageData(frame, 90)
@@ -812,18 +854,53 @@ export default function ScannerView({
         )
       : null;
 
-    if (exportPoints && exportPoints.length === 4) {
-      return {
-        blob: await applyPerspectiveTransform(exportFrame, exportPoints),
-        frame: exportFrame,
-      };
-    }
-
     return {
-      blob: await imageDataToPngBlob(exportFrame),
+      sourceBlob: await imageDataToPngBlob(exportFrame),
       frame: exportFrame,
+      points: exportPoints,
     };
   }, []);
+
+  const orientCaptureArtifactToPreview = useCallback(async (
+    frame: ImageData,
+    documentPoints: Point[] | null,
+    originalBlob?: Blob,
+  ): Promise<PreparedCaptureArtifact> => {
+    const exportOrientation = previewOrientationRef.current;
+    const exportFrame = exportOrientation === "portrait"
+      ? rotateImageData(frame, 90)
+      : frame;
+    const exportPoints = documentPoints && documentPoints.length === 4
+      ? (
+          exportOrientation === "portrait"
+            ? orientPointsForPreview(documentPoints, frame.width, frame.height, "portrait")
+            : documentPoints
+        )
+      : null;
+
+    return {
+      sourceBlob: originalBlob && exportFrame === frame
+        ? originalBlob
+        : await imageDataToPngBlob(exportFrame),
+      frame: exportFrame,
+      points: exportPoints,
+    };
+  }, []);
+
+  const renderProcessedDocumentBlob = useCallback(async (
+    frame: ImageData,
+    documentPoints: Point[] | null,
+  ): Promise<Blob> => {
+    const baseBlob = documentPoints && documentPoints.length === 4
+      ? await applyPerspectiveTransform(frame, documentPoints)
+      : await imageDataToPngBlob(frame);
+
+    if (!imageEnhancement) {
+      return baseBlob;
+    }
+
+    return await enhanceDocumentImage(baseBlob);
+  }, [imageEnhancement]);
 
   const logHighQualityStillFailureDiagnostics = useCallback(async (
     stillCapture: ScannerStillCapture,
@@ -864,10 +941,10 @@ export default function ScannerView({
     }
   }, []);
 
-  const buildHighQualityDocumentBlob = useCallback(async (
+  const buildHighQualityCaptureArtifact = useCallback(async (
     source: FrameSource,
     snapshot: PreviewCaptureSnapshot,
-  ): Promise<HighQualityCaptureArtifact> => {
+  ): Promise<PreparedCaptureArtifact> => {
     const stillCapture = await source.captureStillFrame();
     let decodedStillFrame: ImageData;
     try {
@@ -923,51 +1000,145 @@ export default function ScannerView({
         })
       : null;
 
-    const artifact = await buildDocumentBlob(selectedStillFrame, mappedPoints);
-    return {
-      blob: artifact.blob,
-      frame: artifact.frame,
-      source: stillCapture.source,
-      width: artifact.frame.width,
-      height: artifact.frame.height,
-    };
-  }, [buildDocumentBlob, logHighQualityStillFailureDiagnostics]);
+    const artifact = await orientCaptureArtifactToPreview(
+      selectedStillFrame,
+      mappedPoints,
+      selectedStillFrame === decodedStillFrame ? stillCapture.file : undefined,
+    );
 
-  const assertCaptureBlobPreviewable = useCallback(async (blob: Blob): Promise<void> => {
-    try {
-      await decodeBlobToImageData(blob);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`Captured image is not previewable: ${message}`);
-    }
+    return {
+      ...artifact,
+      source: stillCapture.source,
+    };
+  }, [logHighQualityStillFailureDiagnostics, orientCaptureArtifactToPreview]);
+
+  const buildCaptureFile = useCallback((blob: Blob, outputNameBase: string): File => {
+    const fileExtension = blob.type === "image/jpeg" ? "jpg" : "png";
+    const fileType = blob.type || (fileExtension === "jpg" ? "image/jpeg" : "image/png");
+
+    return new File([blob], `${outputNameBase}.${fileExtension}`, {
+      type: fileType,
+    });
   }, []);
 
+  const invalidateCapturedDocumentQueue = useCallback(() => {
+    capturedDocumentQueueGenerationRef.current += 1;
+    capturedDocumentProcessVersionsRef.current.clear();
+    capturedDocumentQueueRef.current = Promise.resolve();
+    setEditingCapturedDocumentId(null);
+  }, []);
+
+  const queueCapturedDocumentProcessing = useCallback((
+    documentId: string,
+    sourceFile: File,
+    outputNameBase: string,
+    documentPoints: Point[] | null,
+    initialFrame?: ImageData,
+  ): void => {
+    const queueGeneration = capturedDocumentQueueGenerationRef.current;
+    const nextVersion = (capturedDocumentProcessVersionsRef.current.get(documentId) ?? 0) + 1;
+    capturedDocumentProcessVersionsRef.current.set(documentId, nextVersion);
+
+    updateCapturedDocument(documentId, {
+      status: "processing",
+      error: null,
+      points: clonePoints(documentPoints),
+    });
+
+    const runProcessing = async (): Promise<void> => {
+      const processingFrame = initialFrame ?? await decodeBlobToImageData(sourceFile);
+      const processedBlob = await renderProcessedDocumentBlob(processingFrame, documentPoints);
+      const processedFile = buildCaptureFile(processedBlob, outputNameBase);
+
+      if (
+        queueGeneration !== capturedDocumentQueueGenerationRef.current
+        || capturedDocumentProcessVersionsRef.current.get(documentId) !== nextVersion
+      ) {
+        return;
+      }
+
+      updateCapturedDocument(documentId, {
+        file: processedFile,
+        points: clonePoints(documentPoints),
+        status: "ready",
+        error: null,
+      });
+    };
+
+    capturedDocumentQueueRef.current = capturedDocumentQueueRef.current
+      .catch(() => undefined)
+      .then(runProcessing)
+      .catch((error) => {
+        if (
+          queueGeneration !== capturedDocumentQueueGenerationRef.current
+          || capturedDocumentProcessVersionsRef.current.get(documentId) !== nextVersion
+        ) {
+          return;
+        }
+
+        const message = error instanceof Error ? error.message : String(error);
+        updateCapturedDocument(documentId, {
+          points: clonePoints(documentPoints),
+          status: "failed",
+          error: message,
+        });
+        toast.error(t("toasts.post-process-failed", {message}));
+      });
+  }, [buildCaptureFile, renderProcessedDocumentBlob, t, updateCapturedDocument]);
+
   const saveCapturedDocument = useCallback((
-    blob: Blob,
-    frame: ImageData,
-    captureWidth: number | null,
-    captureHeight: number | null,
+    artifact: PreparedCaptureArtifact,
     documentDetected: boolean,
     captureSource: "preview-stream" | "single-hq",
   ) => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const prefix = captureSource === "single-hq" ? "scan_hq" : "scan_preview";
-    const fileExtension = blob.type === "image/jpeg" ? "jpg" : "png";
-    const fileType = blob.type || (fileExtension === "jpg" ? "image/jpeg" : "image/png");
-    const file = new File([blob], `${prefix}_${timestamp}.${fileExtension}`, {
-      type: fileType,
+    const outputNameBase = `${prefix}_${timestamp}`;
+    const sourceExtension = artifact.sourceBlob.type === "image/jpeg" ? "jpg" : "png";
+    const sourceType = artifact.sourceBlob.type || (sourceExtension === "jpg" ? "image/jpeg" : "image/png");
+    const sourceFile = new File([artifact.sourceBlob], `${outputNameBase}_source.${sourceExtension}`, {
+      type: sourceType,
+    });
+    const pointsForDocument = clonePoints(artifact.points);
+    const needsPostProcessing = Boolean(
+      imageEnhancement
+      || (pointsForDocument && pointsForDocument.length === 4),
+    );
+    const documentId = crypto.randomUUID();
+
+    addCapturedDocument({
+      id: documentId,
+      file: sourceFile,
+      sourceFile,
+      points: pointsForDocument,
+      status: needsPostProcessing ? "processing" : "ready",
+      error: null,
+      documentDetected,
+      captureSource,
+      sourceWidth: artifact.frame.width,
+      sourceHeight: artifact.frame.height,
+      outputNameBase,
     });
 
-    addCapturedDocument(file);
+    if (needsPostProcessing) {
+      queueCapturedDocumentProcessing(
+        documentId,
+        sourceFile,
+        outputNameBase,
+        pointsForDocument,
+        artifact.frame,
+      );
+    }
+
     setCaptureDebug({
       lastCaptureSource: captureSource,
-      lastCaptureWidth: captureWidth ?? frame.width,
-      lastCaptureHeight: captureHeight ?? frame.height,
+      lastCaptureWidth: artifact.frame.width,
+      lastCaptureHeight: artifact.frame.height,
       lastCaptureAt: Date.now(),
       lastCaptureError: null,
       lastCaptureDocumentDetected: documentDetected,
     });
-  }, [addCapturedDocument, setCaptureDebug]);
+  }, [addCapturedDocument, imageEnhancement, queueCapturedDocumentProcessing, setCaptureDebug]);
 
   const createCaptureSnapshot = useCallback((
     frame: ImageData,
@@ -1015,10 +1186,7 @@ export default function ScannerView({
 
     try {
       const highQualitySource = highQualityEnabled ? frameSourceRef.current : null;
-      let blob: Blob | null = null;
-      let resultFrame = frame;
-      let captureWidth: number | null = frame.width;
-      let captureHeight: number | null = frame.height;
+      let captureArtifact: PreparedCaptureArtifact | null = null;
       let captureSource: "preview-stream" | "single-hq" = "preview-stream";
       const requiresHighQualitySource = highQualityEnabled;
 
@@ -1033,15 +1201,12 @@ export default function ScannerView({
               highQualitySource: null,
               highQualityFallbackReason: null,
             });
-            const artifact = await buildHighQualityDocumentBlob(highQualitySource, snapshot);
-            blob = artifact.blob;
-            resultFrame = artifact.frame;
-            captureWidth = artifact.width;
-            captureHeight = artifact.height;
+            const artifact = await buildHighQualityCaptureArtifact(highQualitySource, snapshot);
+            captureArtifact = artifact;
             captureSource = "single-hq";
             setCaptureDebug({
               highQualityStatus: "success",
-              highQualitySource: artifact.source,
+              highQualitySource: artifact.source ?? null,
               highQualityFallbackReason: null,
             });
             lastHighQualityError = null;
@@ -1071,29 +1236,22 @@ export default function ScannerView({
         }
       }
 
-      if (!blob) {
-        const artifact = await buildDocumentBlob(frame, sourcePoints);
-        blob = artifact.blob;
-        resultFrame = artifact.frame;
-        captureWidth = artifact.frame.width;
-        captureHeight = artifact.frame.height;
+      if (!captureArtifact) {
+        captureArtifact = await buildDocumentSourceArtifact(frame, sourcePoints);
       }
 
       if (!canCommitCaptureResult(captureGeneration)) {
         return;
       }
-      await assertCaptureBlobPreviewable(blob);
-      if (!canCommitCaptureResult(captureGeneration)) {
-        return;
-      }
       saveCapturedDocument(
-        blob,
-        resultFrame,
-        captureWidth,
-        captureHeight,
+        captureArtifact,
         Boolean(sourcePoints && sourcePoints.length === 4),
         captureSource,
       );
+      setProcessingState(false);
+      if (!canCommitCaptureResult(captureGeneration)) {
+        return;
+      }
       toast.success(t("toasts.preview-ready"));
       schedulePreviewCooldown();
     } catch (error) {
@@ -1111,9 +1269,8 @@ export default function ScannerView({
       }
     }
   }, [
-    buildDocumentBlob,
-    buildHighQualityDocumentBlob,
-    assertCaptureBlobPreviewable,
+    buildDocumentSourceArtifact,
+    buildHighQualityCaptureArtifact,
     canCommitCaptureResult,
     publishCvDebug,
     saveCapturedDocument,
@@ -1645,9 +1802,35 @@ export default function ScannerView({
     void captureDocument(createCaptureSnapshot(frame, null), "manual");
   }, [captureDocument, createCaptureSnapshot]);
 
-  const handleRemoveCapturedDocument = useCallback((index: number) => {
-    removeCapturedDocument(index);
-  }, [removeCapturedDocument]);
+  const handleRemoveCapturedDocument = useCallback((documentId: string) => {
+    capturedDocumentProcessVersionsRef.current.delete(documentId);
+    if (editingCapturedDocumentId === documentId) {
+      setEditingCapturedDocumentId(null);
+    }
+    removeCapturedDocument(documentId);
+  }, [editingCapturedDocumentId, removeCapturedDocument]);
+
+  const handleEditCapturedDocument = useCallback((documentId: string) => {
+    setEditingCapturedDocumentId(documentId);
+  }, []);
+
+  const handleApplyCapturedDocumentEdit = useCallback((
+    documentId: string,
+    nextPoints: Point[],
+  ) => {
+    const document = capturedDocuments.find((entry) => entry.id === documentId);
+    if (!document) {
+      return;
+    }
+
+    setEditingCapturedDocumentId(null);
+    queueCapturedDocumentProcessing(
+      documentId,
+      document.sourceFile,
+      document.outputNameBase,
+      nextPoints,
+    );
+  }, [capturedDocuments, queueCapturedDocumentProcessing]);
 
   const handlePreviewOrientationToggle = useCallback(() => {
     setPreviewOrientation((current) => (current === "landscape" ? "portrait" : "landscape"));
@@ -1658,20 +1841,32 @@ export default function ScannerView({
       toast.error(t("toasts.no-documents"));
       return;
     }
+    const processingCount = capturedDocuments.filter((document) => document.status === "processing").length;
+    if (processingCount > 0) {
+      toast.info(t("toasts.post-processing-pending", {count: processingCount}));
+      return;
+    }
+    const failedCount = capturedDocuments.filter((document) => document.status === "failed").length;
+    if (failedCount > 0) {
+      toast.error(t("toasts.post-processing-blocked", {count: failedCount}));
+      return;
+    }
     if (captureCommitPendingRef.current) {
       return;
     }
 
     invalidatePendingCaptureCommits();
+    invalidateCapturedDocumentQueue();
     clearProcessingCooldown();
     setProcessingState(false);
-    onDocumentsCaptured?.(capturedDocuments);
+    onDocumentsCaptured?.(capturedDocuments.map((document) => document.file));
     clearCapturedDocuments();
     onOpenChange(false);
   }, [
     capturedDocuments,
     clearCapturedDocuments,
     clearProcessingCooldown,
+    invalidateCapturedDocumentQueue,
     invalidatePendingCaptureCommits,
     onDocumentsCaptured,
     onOpenChange,
@@ -1700,11 +1895,22 @@ export default function ScannerView({
     dialogOpenRef.current = isOpen;
     if (!isOpen) {
       invalidatePendingCaptureCommits();
+      invalidateCapturedDocumentQueue();
+      setProcessingState(false);
+      setCaptureCommitPendingState(false);
       latestCvSnapshotRef.current = null;
       void handleStop();
       reset();
     }
-  }, [handleStop, invalidatePendingCaptureCommits, isOpen, reset]);
+  }, [
+    handleStop,
+    invalidateCapturedDocumentQueue,
+    invalidatePendingCaptureCommits,
+    isOpen,
+    reset,
+    setCaptureCommitPendingState,
+    setProcessingState,
+  ]);
 
   useEffect(() => {
     // Strict Mode mounts effects twice in development, so reset the ref here
@@ -1714,25 +1920,28 @@ export default function ScannerView({
     return () => {
       unmountedRef.current = true;
       dialogOpenRef.current = false;
+      invalidateCapturedDocumentQueue();
       // Reuse the full stop path so transport teardown also cancels RAF and stops the source.
       void stopScannerRef.current?.({ skipComponentState: true });
     };
-  }, []);
+  }, [invalidateCapturedDocumentQueue]);
 
   const isPortraitSplitLayout = previewOrientation === "portrait";
   const dialogSectionPaddingClass = "px-4 sm:px-5 lg:px-6";
   const dialogWidthClass = isPortraitSplitLayout
-    ? "sm:!w-[min(100vw-2rem,1540px)] sm:!max-w-[min(100vw-2rem,1540px)]"
-    : "sm:!w-[min(100vw-2rem,1360px)] sm:!max-w-[min(100vw-2rem,1360px)]";
+    ? "sm:!w-[min(100vw-2rem,1320px)] sm:!max-w-[min(100vw-2rem,1320px)]"
+    : "sm:!w-[min(100vw-2rem,1180px)] sm:!max-w-[min(100vw-2rem,1180px)]";
   const scannerContentWidthClass = isPortraitSplitLayout
-    ? "mx-auto w-full max-w-[1440px] space-y-4"
-    : "mx-auto w-full max-w-[1200px] space-y-4";
+    ? "mx-auto w-full max-w-[1260px] space-y-4"
+    : "mx-auto w-full max-w-[1120px] space-y-4";
   const previewColumnWidthClass = isPortraitSplitLayout
     ? "xl:max-w-[384px] 2xl:max-w-[400px]"
     : "xl:max-w-[680px]";
   const scannerGridClass = isPortraitSplitLayout
     ? "xl:mx-auto xl:w-fit xl:max-w-full xl:grid-cols-[minmax(0,384px)_minmax(320px,360px)_minmax(320px,400px)] 2xl:grid-cols-[minmax(0,400px)_minmax(340px,380px)_minmax(340px,420px)]"
     : "xl:w-full xl:grid-cols-[minmax(0,1fr)_minmax(320px,400px)] 2xl:grid-cols-[minmax(0,1.05fr)_minmax(340px,420px)]";
+  const hasProcessingCapturedDocuments = capturedDocuments.some((document) => document.status === "processing");
+  const hasFailedCapturedDocuments = capturedDocuments.some((document) => document.status === "failed");
 
   const previewSurface = (
     <div
@@ -1820,7 +2029,7 @@ export default function ScannerView({
       {isOpen ? <OpenCVLoader /> : null}
       <DialogContent
         size="scanner"
-        className={cn("!flex h-[min(94vh,1040px)] flex-col overflow-hidden p-0", dialogWidthClass)}
+        className={cn("!flex h-[min(92vh,960px)] flex-col overflow-hidden p-0", dialogWidthClass)}
       >
         <DialogHeader className={cn("shrink-0 border-b pb-3 pt-4", dialogSectionPaddingClass)}>
           <DialogTitle className="flex items-center gap-2">
@@ -1883,29 +2092,21 @@ export default function ScannerView({
 
                 <div className="flex gap-3 overflow-x-auto pb-1 sm:gap-4">
                   {capturedDocuments.map((doc, index) => (
-                    <div
-                      key={`${doc.name}-${index}`}
-                      className="group relative shrink-0"
-                    >
-                      {capturedPreviewUrls[index] ? (
-                        <>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={capturedPreviewUrls[index]}
-                            alt={t("captured.preview-alt", { index: index + 1 })}
-                            className="h-28 w-24 rounded border bg-background object-cover shadow-sm transition-transform group-hover:scale-105"
-                          />
-                          <button
-                            className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-destructive text-destructive-foreground opacity-0 shadow-md transition-opacity group-hover:opacity-100"
-                            onClick={() => handleRemoveCapturedDocument(index)}
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                        </>
-                      ) : (
-                        <div className="h-28 w-24 rounded border bg-muted/60 shadow-sm" />
-                      )}
-                    </div>
+                    <ScannerCapturedDocumentThumbnail
+                      key={doc.id}
+                      document={doc}
+                      index={index}
+                      onEdit={handleEditCapturedDocument}
+                      onRemove={handleRemoveCapturedDocument}
+                      previewAlt={t("captured.preview-alt", { index: index + 1 })}
+                      statusLabel={
+                        doc.status === "processing"
+                          ? t("captured.status.processing")
+                          : doc.status === "failed"
+                            ? t("captured.status.failed")
+                            : t("captured.status.ready")
+                      }
+                    />
                   ))}
                 </div>
               </div>
@@ -1917,16 +2118,37 @@ export default function ScannerView({
           <Button
             variant="default"
             onClick={handleSendToAI}
-            disabled={capturedDocuments.length === 0 || isCaptureCommitPending}
+            disabled={
+              capturedDocuments.length === 0
+              || isCaptureCommitPending
+              || hasProcessingCapturedDocuments
+              || hasFailedCapturedDocuments
+            }
             className={cn(
               "min-w-32 w-full sm:w-auto",
-              (capturedDocuments.length === 0 || isCaptureCommitPending) && "opacity-50 grayscale",
+              (
+                capturedDocuments.length === 0
+                || isCaptureCommitPending
+                || hasProcessingCapturedDocuments
+                || hasFailedCapturedDocuments
+              ) && "opacity-50 grayscale",
             )}
           >
             {t("actions.send-to-ai", { count: capturedDocuments.length })}
           </Button>
         </DialogFooter>
       </DialogContent>
+      <ScannerCapturedDocumentEditor
+        open={Boolean(editingCapturedDocument)}
+        document={editingCapturedDocument}
+        isApplying={editingCapturedDocument?.status === "processing"}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingCapturedDocumentId(null);
+          }
+        }}
+        onApply={handleApplyCapturedDocumentEdit}
+      />
     </Dialog>
   );
 }

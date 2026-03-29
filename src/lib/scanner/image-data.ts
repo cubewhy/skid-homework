@@ -91,7 +91,7 @@ export const decodeImageUrlToImageData = async (
   });
 };
 
-const readBlobAsDataUrl = async (blob: Blob): Promise<string> => {
+export const readBlobAsDataUrl = async (blob: Blob): Promise<string> => {
   return await new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {

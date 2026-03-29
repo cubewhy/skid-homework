@@ -502,7 +502,7 @@ export default function UploadArea({ appendFiles, allowPdf }: UploadAreaProps) {
       <ScannerView
         isOpen={scannerDialogOpen}
         onOpenChange={setScannerDialogOpen}
-        onDocumentsCaptured={(files) => appendFiles(files, "adb")}
+        onDocumentsCaptured={(files) => appendFiles(files, "scanner")}
       />
     </>
   );

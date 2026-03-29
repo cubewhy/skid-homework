@@ -11,6 +11,7 @@ pub fn run() {
       adb_plugin::tauri_adb_connect,
       adb_plugin::tauri_adb_screenshot,
       adb_plugin::tauri_adb_capture_still,
+      adb_plugin::tauri_adb_capture_still_stream,
       adb_plugin::tauri_adb_shell,
       adb_plugin::tauri_adb_push,
       adb_plugin::tauri_adb_forward,

@@ -23,7 +23,7 @@ export interface TauriAdbPairRequest {
 export interface TauriAdbStillPayload {
   mimeType: string;
   bytes: Uint8Array;
-  transport: "raw-ipc";
+  transport: string;
 }
 
 const invokeTauriCommand = async <T>(
@@ -93,6 +93,20 @@ export const captureTauriAdbStill = (
       mimeType: "image/jpeg",
       bytes,
       transport: "raw-ipc",
+    };
+  });
+};
+
+export const captureTauriAdbStillStream = (
+  port: number,
+): Promise<TauriAdbStillPayload> => {
+  return invokeTauriBinaryCommand("tauri_adb_capture_still_stream", {
+    port,
+  }).then((bytes) => {
+    return {
+      mimeType: "image/jpeg",
+      bytes,
+      transport: "forwarded-stream",
     };
   });
 };

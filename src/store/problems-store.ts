@@ -1,9 +1,9 @@
-import { create } from "zustand";
-import { db, type HomeworkRecord } from "@/db/problems-db";
-import { createJSONStorage, persist } from "zustand/middleware";
+import {create} from "zustand";
+import {db, type HomeworkRecord} from "@/db/problems-db";
+import {createJSONStorage, persist} from "zustand/middleware";
 
 export type FileStatus = "success" | "pending" | "failed" | "processing";
-export type HomeworkSource = "upload" | "camera" | "adb";
+export type HomeworkSource = "upload" | "camera" | "adb" | "scanner";
 
 export type FileItem = {
   id: string;

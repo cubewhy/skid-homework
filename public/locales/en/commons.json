@@ -320,7 +320,12 @@
       "description": "Preview captures are collected here for review and export.",
       "item-count": "{{count}} item",
       "item-count_plural": "{{count}} items",
-      "preview-alt": "Captured document {{index}}"
+      "preview-alt": "Captured document {{index}}",
+      "status": {
+        "processing": "Post-processing",
+        "ready": "Tap to adjust",
+        "failed": "Needs retry"
+      }
     },
     "connection": {
       "recovering": "Recovering preview stream...",
@@ -341,10 +346,27 @@
       "capturing-preview": "Capturing from preview...",
       "preview-ready": "Preview capture ready.",
       "preview-failed": "Preview capture failed: {{message}}",
+      "post-process-failed": "Document post-processing failed: {{message}}",
+      "post-processing-pending": "{{count}} captured document is still post-processing.",
+      "post-processing-pending_plural": "{{count}} captured documents are still post-processing.",
+      "post-processing-blocked": "{{count}} captured document failed post-processing. Adjust or remove it before sending.",
+      "post-processing-blocked_plural": "{{count}} captured documents failed post-processing. Adjust or remove them before sending.",
       "no-device": "No ADB device connected. Please connect a device first.",
       "server-jar-missing": "Failed to locate camera-server.jar resource.",
       "start-failed": "Failed to start scanner: {{message}}",
       "no-documents": "No documents captured yet."
+    },
+    "editor": {
+      "title": "Adjust Document Corners",
+      "description": "Drag the four corners to match the document, then re-run the crop.",
+      "image-alt": "Captured document source",
+      "hint": "Tip: align the handles with the real page corners before applying.",
+      "actions": {
+        "reset": "Reset",
+        "cancel": "Cancel",
+        "apply": "Apply Crop",
+        "applying": "Applying..."
+      }
     },
     "controls": {
       "title": "Live Preview Controls",
@@ -911,7 +933,8 @@
   "sources": {
     "upload": "Upload",
     "camera": "Camera",
-    "adb": "ADB"
+    "adb": "ADB",
+    "scanner": "Scanner"
   },
   "ai-client": {
     "openai": {
