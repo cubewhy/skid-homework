@@ -44,6 +44,9 @@ devenv.local.yaml
 # local qodana checks
 qodana.yaml
 
+# temp tooling
+.tmp/
+
 # serwist
 public/sw.js
 public/sw.js.map

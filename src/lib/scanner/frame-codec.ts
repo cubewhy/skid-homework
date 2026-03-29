@@ -5,11 +5,14 @@
 export const FRAME_CODEC_QOI = 1;
 export const FRAME_CODEC_LUMA8 = 2;
 export const FRAME_CODEC_I420 = 3;
+export const FRAME_CODEC_I420_TELEMETRY = 4;
 export const FRAME_PACKET_HEADER_SIZE = 9;
+export const FRAME_PACKET_TELEMETRY_SIZE = 12;
 
 export interface NormalizedFramePayload { buffer: ArrayBuffer; byteOffset: number; byteLength: number; }
-export interface ParsedFramePacket { codec: number; width: number; height: number; payload: Uint8Array; }
-export interface DecodedRgbaFrame { width: number; height: number; rgba: Uint8ClampedArray<ArrayBuffer>; }
+export interface FramePacketTelemetry { sentAtEpochMs: number; sequence: number; }
+export interface ParsedFramePacket { codec: number; width: number; height: number; payload: Uint8Array; telemetry: FramePacketTelemetry | null; }
+export interface DecodedRgbaFrame { width: number; height: number; rgba: Uint8ClampedArray<ArrayBuffer>; telemetry: FramePacketTelemetry | null; }
 
 
 const QOI_MAGIC = [0x71, 0x6f, 0x69, 0x66];
@@ -96,9 +99,24 @@ export const parseFramePacket = (data: Uint8Array | ArrayBuffer | number[]): Par
   const codec = view.getUint8(0);
   const width = view.getUint32(1, false);
   const height = view.getUint32(5, false);
-  const payload = new Uint8Array(buffer, byteOffset + FRAME_PACKET_HEADER_SIZE, byteLength - FRAME_PACKET_HEADER_SIZE);
+  let payloadOffset = FRAME_PACKET_HEADER_SIZE;
+  let telemetry: FramePacketTelemetry | null = null;
 
-  return { codec, width, height, payload };
+  if (codec === FRAME_CODEC_I420_TELEMETRY) {
+    if (byteLength < FRAME_PACKET_HEADER_SIZE + FRAME_PACKET_TELEMETRY_SIZE) {
+      throw new Error("Frame packet telemetry header is truncated.");
+    }
+
+    telemetry = {
+      sentAtEpochMs: Number(view.getBigUint64(FRAME_PACKET_HEADER_SIZE, false)),
+      sequence: view.getUint32(FRAME_PACKET_HEADER_SIZE + 8, false),
+    };
+    payloadOffset += FRAME_PACKET_TELEMETRY_SIZE;
+  }
+
+  const payload = new Uint8Array(buffer, byteOffset + payloadOffset, byteLength - payloadOffset);
+
+  return { codec, width, height, payload, telemetry };
 };
 
 /**
@@ -109,13 +127,14 @@ export const parseFramePacket = (data: Uint8Array | ArrayBuffer | number[]): Par
  * @returns {{ width: number, height: number, rgba: Uint8ClampedArray }}
  */
 export const decodeFramePacketToRgba = (data: Uint8Array | ArrayBuffer | number[], targetRgba?: Uint8ClampedArray<ArrayBufferLike>): DecodedRgbaFrame => {
-  const { codec, width, height, payload } = parseFramePacket(data);
+  const { codec, width, height, payload, telemetry } = parseFramePacket(data);
 
   if (codec === FRAME_CODEC_QOI) {
     return {
       width,
       height,
       rgba: decodeQoiToRgba(payload, width, height),
+      telemetry,
     };
   }
 
@@ -124,14 +143,16 @@ export const decodeFramePacketToRgba = (data: Uint8Array | ArrayBuffer | number[
       width,
       height,
       rgba: decodeLuma8ToRgba(payload, width, height, targetRgba),
+      telemetry,
     };
   }
 
-  if (codec === FRAME_CODEC_I420) {
+  if (codec === FRAME_CODEC_I420 || codec === FRAME_CODEC_I420_TELEMETRY) {
     return {
       width,
       height,
       rgba: decodeI420ToRgba(payload, width, height, targetRgba),
+      telemetry,
     };
   }
 

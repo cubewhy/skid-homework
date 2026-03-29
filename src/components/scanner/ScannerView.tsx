@@ -692,6 +692,7 @@ export default function ScannerView({
       recentWindowFps: toNullableMetric(state.metrics.recentWindowFps),
       effectiveFps: toNullableMetric(state.metrics.effectiveFps),
       payloadBytes: toNullableMetric(state.metrics.lastPayloadBytes),
+      pollWaitMs: toNullableMetric(state.metrics.lastIpcMs),
       jsDecodeMs: toNullableMetric(state.metrics.lastDecodeMs),
       pollCount: state.metrics.pollCount > 0 ? state.metrics.pollCount : null,
       previewWidth: state.metrics.previewWidth,

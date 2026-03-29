@@ -16,11 +16,16 @@ import {
   startTauriDecodeStream,
   stopTauriAdbServer,
   stopTauriDecodeStream,
+  type TauriDecodeStreamLifecycleEvent,
   type TauriDecodeStreamHandle,
 } from "@/lib/tauri/adb";
 import {isTauri} from "@/lib/tauri/platform";
 
-import {decodeFramePacketToRgba, FRAME_PACKET_HEADER_SIZE} from "./frame-codec";
+import {
+  decodeFramePacketToRgba,
+  FRAME_PACKET_HEADER_SIZE,
+  FRAME_PACKET_TELEMETRY_SIZE,
+} from "./frame-codec";
 
 /** Callback type for receiving decoded preview frames. */
 export type FrameCallback = (frame: ImageData) => void;
@@ -137,12 +142,9 @@ export interface ScannerStillCapture {
 
 type DecoderLifecycleState = "starting" | "connected" | "reconnecting" | "ready" | "error" | "stopped";
 
-interface DecoderLifecycleEvent {
+type DecoderLifecycleEvent = TauriDecodeStreamLifecycleEvent & {
   state: DecoderLifecycleState;
-  detail: string;
-  recoverable: boolean;
-  reconnectAttempt: number;
-}
+};
 
 /** Frame source lifecycle interface. */
 export interface FrameSource {
@@ -561,6 +563,10 @@ interface BenchmarkAccumulator {
 
 const nowMs = (): number => {
   return performance.now();
+};
+
+const nowEpochMs = (): number => {
+  return performance.timeOrigin + performance.now();
 };
 
 const sleep = async (delayMs: number): Promise<void> => {
@@ -982,12 +988,10 @@ export class TauriNativeFrameSource implements FrameSource {
   private stillForwardActive = false;
   private serverRunning = false;
   private decoderRunning = false;
-  private eventListenersReady = false;
   private suppressUnexpectedEventsUntil = 0;
   private reconnectLoopPromise: Promise<void> | null = null;
   private watchdogTimeoutId: ReturnType<typeof setTimeout> | null = null;
   private decoderStreamHandle: TauriDecodeStreamHandle | null = null;
-  private cleanupListeners: (() => void) | null = null;
   private lastStateEmitAt = 0;
   private recoveryErrorReported = false;
   private streamStartedAt: number | null = null;
@@ -1137,7 +1141,6 @@ export class TauriNativeFrameSource implements FrameSource {
     this.desiredRunning = true;
     this.recoveryErrorReported = false;
     this.resetRuntimeMetrics();
-    await this.ensureEventListeners();
     try {
       await this.ensureStreaming("manual-start");
     } catch (error) {
@@ -1149,7 +1152,6 @@ export class TauriNativeFrameSource implements FrameSource {
         stopServer: true,
         removeForward: true,
       });
-      await this.disposeEventListeners();
       this.reconnectLoopPromise = null;
       throw error;
     }
@@ -1179,7 +1181,6 @@ export class TauriNativeFrameSource implements FrameSource {
       stopServer: true,
       removeForward: true,
     });
-    await this.disposeEventListeners();
     this.reconnectLoopPromise = null;
     this.updateState(
       {
@@ -1190,33 +1191,6 @@ export class TauriNativeFrameSource implements FrameSource {
       },
       true,
     );
-  }
-
-  private async ensureEventListeners(): Promise<void> {
-    if (this.eventListenersReady) {
-      return;
-    }
-
-    const { listen } = await import("@tauri-apps/api/event");
-    const unlistenDecoderStatus = await listen<DecoderLifecycleEvent>(
-      "scanner:decoder-status",
-      (event) => {
-        void this.handleDecoderLifecycleEvent(event.payload);
-      },
-    );
-
-    this.cleanupListeners = () => {
-      unlistenDecoderStatus();
-    };
-    this.eventListenersReady = true;
-  }
-
-  private async disposeEventListeners(): Promise<void> {
-    if (this.cleanupListeners) {
-      this.cleanupListeners();
-      this.cleanupListeners = null;
-    }
-    this.eventListenersReady = false;
   }
 
   private async handleDecoderLifecycleEvent(event: DecoderLifecycleEvent): Promise<void> {
@@ -1405,8 +1379,16 @@ export class TauriNativeFrameSource implements FrameSource {
       (framePacket) => {
         void this.handleStreamPacket(framePacket);
       },
+      (event) => {
+        void this.handleDecoderLifecycleEvent(event);
+      },
     );
     this.decoderRunning = true;
+  }
+
+  private releaseDecodeStreamHandle(): void {
+    this.decoderStreamHandle?.dispose();
+    this.decoderStreamHandle = null;
   }
 
   private activateReadyStream(): void {
@@ -1542,7 +1524,7 @@ export class TauriNativeFrameSource implements FrameSource {
         this.state.reconnectAttempt = nextAttempt;
         this.streamActive = false;
         this.decoderRunning = false;
-        this.decoderStreamHandle = null;
+        this.releaseDecodeStreamHandle();
         this.updateState(
           {
             status: "reconnecting",
@@ -1580,14 +1562,18 @@ export class TauriNativeFrameSource implements FrameSource {
         return;
       }
 
+      const receivedAtEpochMs = nowEpochMs();
       const decodeStart = nowMs();
-      const { width, height, rgba } = decodeFramePacketToRgba(
+      const { width, height, rgba, telemetry } = decodeFramePacketToRgba(
         framePacket,
         this.decodeTargetRgba ?? undefined,
       );
       this.decodeTargetRgba = rgba;
       const decodeMs = nowMs() - decodeStart;
-      const payloadBytes = packetByteLength - FRAME_PACKET_HEADER_SIZE;
+      const payloadBytes = packetByteLength - FRAME_PACKET_HEADER_SIZE - (telemetry ? FRAME_PACKET_TELEMETRY_SIZE : 0);
+      const ipcMs = telemetry
+        ? Math.max(0, receivedAtEpochMs - telemetry.sentAtEpochMs)
+        : 0;
 
       this.benchmark.totalPolls += 1;
       this.state.metrics.pollCount = this.benchmark.totalPolls;
@@ -1598,7 +1584,7 @@ export class TauriNativeFrameSource implements FrameSource {
         width,
         height,
         payloadBytes,
-        0,
+        ipcMs,
         decodeMs,
       );
     } catch (error) {
@@ -1712,7 +1698,7 @@ export class TauriNativeFrameSource implements FrameSource {
 
     this.streamActive = false;
     this.decoderRunning = false;
-    this.decoderStreamHandle = null;
+    this.releaseDecodeStreamHandle();
     this.clearTimers();
     this.markReconnectStarted();
     this.emitRecoverableError(reason);
@@ -1838,7 +1824,7 @@ export class TauriNativeFrameSource implements FrameSource {
   private async stopDecodeStream(): Promise<void> {
     this.streamActive = false;
     this.decoderRunning = false;
-    this.decoderStreamHandle = null;
+    this.releaseDecodeStreamHandle();
     this.suppressUnexpectedEvents(RECOVERY_EVENT_SUPPRESSION_MS);
 
     try {
@@ -1904,7 +1890,7 @@ export class TauriNativeFrameSource implements FrameSource {
     this.lastStateEmitAt = 0;
     this.streamStartedAt = null;
     this.decodeTargetRgba = null;
-    this.decoderStreamHandle = null;
+    this.releaseDecodeStreamHandle();
     this.streamActive = false;
     this.forwardActive = false;
     this.serverRunning = false;

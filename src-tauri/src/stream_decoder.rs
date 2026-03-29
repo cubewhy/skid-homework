@@ -6,7 +6,7 @@
 /// frontend over a Tauri IPC channel.
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use openh264::decoder::Decoder;
 use openh264::formats::YUVSource;
@@ -14,7 +14,6 @@ use serde::Serialize;
 use tauri::{
     command,
     ipc::{Channel, InvokeResponseBody},
-    AppHandle, Emitter,
 };
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
@@ -40,9 +39,11 @@ const RECONNECT_RETRY_MAX_DELAY_MS: u64 = 800;
 
 /// Packet layout: codec byte + width + height.
 const FRAME_PACKET_HEADER_SIZE: usize = 9;
+/// Optional benchmark telemetry layout: unix epoch ms + frame sequence.
+const FRAME_PACKET_TELEMETRY_SIZE: usize = 12;
 
-/// Downscaled I420 preview frame payload.
-const FRAME_CODEC_I420: u8 = 3;
+/// Downscaled I420 preview frame payload with telemetry for end-to-end IPC measurement.
+const FRAME_CODEC_I420_TELEMETRY: u8 = 4;
 
 /// Keep live preview under roughly 640x360 to reduce IPC overhead and frontend decode cost.
 const MAX_PREVIEW_WIDTH: usize = 640;
@@ -61,7 +62,7 @@ struct PreviewFrame {
 /// Structured decoder lifecycle event for diagnostics and future UI hooks.
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct DecoderLifecycleEvent {
+pub struct DecoderLifecycleEvent {
     state: String,
     detail: String,
     recoverable: bool,
@@ -78,17 +79,17 @@ enum DecodeLoopExit {
 /// Start receiving and decoding the H.264 video stream from the forwarded port.
 #[command]
 pub async fn tauri_scanner_start_stream(
-    app: AppHandle,
     port: u16,
     frame_channel: Channel<InvokeResponseBody>,
+    status_channel: Channel<DecoderLifecycleEvent>,
 ) -> Result<(), String> {
     if STREAMING.swap(true, Ordering::SeqCst) {
         return Err("Stream decoder is already running.".to_string());
     }
 
     FRAME_SEQ.store(0, Ordering::Relaxed);
-    emit_decoder_status(
-        &app,
+    send_decoder_status(
+        &status_channel,
         "starting",
         format!("Starting decoder for tcp://127.0.0.1:{port}."),
         true,
@@ -96,12 +97,12 @@ pub async fn tauri_scanner_start_stream(
     );
 
     tauri::async_runtime::spawn(async move {
-        let result = decode_stream_loop(&app, port, frame_channel).await;
+        let result = decode_stream_loop(port, frame_channel, status_channel.clone()).await;
 
         match &result {
             Ok(DecodeLoopExit::ManualStop) => {
-                emit_decoder_status(
-                    &app,
+                send_decoder_status(
+                    &status_channel,
                     "stopped",
                     "Stream decoder stopped by request.".to_string(),
                     false,
@@ -109,17 +110,15 @@ pub async fn tauri_scanner_start_stream(
                 );
             }
             Ok(DecodeLoopExit::RemoteClosed { detail }) => {
-                emit_decoder_status(&app, "stopped", detail.clone(), false, 0);
+                send_decoder_status(&status_channel, "stopped", detail.clone(), false, 0);
             }
             Err(error) => {
                 log::error!("Stream decoder error: {error}");
-                emit_decoder_status(&app, "error", error.clone(), false, 0);
-                let _ = app.emit("scanner:error", error.to_string());
+                send_decoder_status(&status_channel, "error", error.clone(), false, 0);
             }
         }
 
         STREAMING.store(false, Ordering::SeqCst);
-        let _ = app.emit("scanner:stopped", ());
     });
 
     Ok(())
@@ -136,19 +135,19 @@ pub async fn tauri_scanner_stop_stream() -> Result<(), String> {
 
 /// Internal decode loop that reads NAL units from TCP and decodes them.
 async fn decode_stream_loop(
-    app: &AppHandle,
     port: u16,
     frame_channel: Channel<InvokeResponseBody>,
+    status_channel: Channel<DecoderLifecycleEvent>,
 ) -> Result<DecodeLoopExit, String> {
     let address = format!("127.0.0.1:{port}");
     let mut reconnect_attempt = 0usize;
     let mut has_received_frame = false;
     let (mut stream, mut decoder) = connect_decoder_stream(
-        app,
         &address,
         STARTUP_CONNECT_MAX_ATTEMPTS,
         reconnect_attempt,
         "Waiting for preview stream to become available.",
+        &status_channel,
     )
     .await?;
 
@@ -192,14 +191,20 @@ async fn decode_stream_loop(
                     )
                 };
                 log::warn!("{detail}");
-                emit_decoder_status(app, "reconnecting", detail, true, reconnect_attempt);
+                send_decoder_status(
+                    &status_channel,
+                    "reconnecting",
+                    detail,
+                    true,
+                    reconnect_attempt,
+                );
                 sleep(Duration::from_millis(reconnect_delay_ms(reconnect_attempt))).await;
                 let (next_stream, next_decoder) = connect_decoder_stream(
-                    app,
                     &address,
                     STREAM_RECONNECT_MAX_ATTEMPTS,
                     reconnect_attempt,
                     "Reconnecting preview stream after socket interruption.",
+                    &status_channel,
                 )
                 .await?;
                 stream = next_stream;
@@ -251,14 +256,20 @@ async fn decode_stream_loop(
                     )
                 };
                 log::warn!("{detail}");
-                emit_decoder_status(app, "reconnecting", detail, true, reconnect_attempt);
+                send_decoder_status(
+                    &status_channel,
+                    "reconnecting",
+                    detail,
+                    true,
+                    reconnect_attempt,
+                );
                 sleep(Duration::from_millis(reconnect_delay_ms(reconnect_attempt))).await;
                 let (next_stream, next_decoder) = connect_decoder_stream(
-                    app,
                     &address,
                     STREAM_RECONNECT_MAX_ATTEMPTS,
                     reconnect_attempt,
                     "Reconnecting preview stream after payload interruption.",
+                    &status_channel,
                 )
                 .await?;
                 stream = next_stream;
@@ -283,7 +294,12 @@ async fn decode_stream_loop(
                 let seq = FRAME_SEQ.fetch_add(1, Ordering::Relaxed);
                 let payload_kb = frame.payload_len as f64 / 1024.0;
                 let nal_kb = nal_length as f64 / 1024.0;
-                let preview_packet = frame.packet;
+                let mut preview_packet = frame.packet;
+                let sent_at_epoch_ms = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_err(|error| format!("System clock drifted before unix epoch: {error}"))?
+                    .as_millis() as u64;
+                write_frame_telemetry(&mut preview_packet, sent_at_epoch_ms, seq as u32)?;
 
                 if seq % 15 == 0 {
                     log::info!(
@@ -306,8 +322,8 @@ async fn decode_stream_loop(
                     })?;
 
                 if first_frame_ready {
-                    emit_decoder_status(
-                        app,
+                    send_decoder_status(
+                        &status_channel,
                         "ready",
                         format!(
                             "Decoder published the first preview frame from tcp://{address}."
@@ -439,10 +455,13 @@ fn pack_i420_preview_packet(
     let expected_payload_len = compute_i420_payload_len(preview_width, preview_height);
     let preview_chroma_width = preview_width / 2;
     let preview_chroma_height = preview_height / 2;
-    let mut packet = Vec::with_capacity(FRAME_PACKET_HEADER_SIZE + expected_payload_len);
-    packet.push(FRAME_CODEC_I420);
+    let mut packet = Vec::with_capacity(
+        FRAME_PACKET_HEADER_SIZE + FRAME_PACKET_TELEMETRY_SIZE + expected_payload_len,
+    );
+    packet.push(FRAME_CODEC_I420_TELEMETRY);
     packet.extend_from_slice(&(preview_width as u32).to_be_bytes());
     packet.extend_from_slice(&(preview_height as u32).to_be_bytes());
+    packet.resize(FRAME_PACKET_HEADER_SIZE + FRAME_PACKET_TELEMETRY_SIZE, 0);
 
     if factor == 1 {
         append_plane_contiguous(&mut packet, y_plane, preview_width, preview_height, y_stride);
@@ -460,7 +479,10 @@ fn pack_i420_preview_packet(
             preview_chroma_height,
             v_stride,
         );
-        debug_assert_eq!(packet.len(), FRAME_PACKET_HEADER_SIZE + expected_payload_len);
+        debug_assert_eq!(
+            packet.len(),
+            FRAME_PACKET_HEADER_SIZE + FRAME_PACKET_TELEMETRY_SIZE + expected_payload_len
+        );
         return packet;
     }
 
@@ -489,8 +511,31 @@ fn pack_i420_preview_packet(
         factor.max(1),
     );
 
-    debug_assert_eq!(packet.len(), FRAME_PACKET_HEADER_SIZE + expected_payload_len);
+    debug_assert_eq!(
+        packet.len(),
+        FRAME_PACKET_HEADER_SIZE + FRAME_PACKET_TELEMETRY_SIZE + expected_payload_len
+    );
     packet
+}
+
+fn write_frame_telemetry(
+    packet: &mut [u8],
+    sent_at_epoch_ms: u64,
+    sequence: u32,
+) -> Result<(), String> {
+    let telemetry_end = FRAME_PACKET_HEADER_SIZE + FRAME_PACKET_TELEMETRY_SIZE;
+    if packet.len() < telemetry_end {
+        return Err(format!(
+            "Preview frame packet is too short to store telemetry: {} bytes.",
+            packet.len()
+        ));
+    }
+
+    packet[FRAME_PACKET_HEADER_SIZE..FRAME_PACKET_HEADER_SIZE + 8]
+        .copy_from_slice(&sent_at_epoch_ms.to_be_bytes());
+    packet[FRAME_PACKET_HEADER_SIZE + 8..telemetry_end]
+        .copy_from_slice(&sequence.to_be_bytes());
+    Ok(())
 }
 
 /// Clamp a dimension to a valid even I420 size.
@@ -566,23 +611,20 @@ fn downsample_plane_by_factor(
     packed
 }
 
-/// Emit a structured decoder lifecycle event for diagnostics and future UI hooks.
-fn emit_decoder_status(
-    app: &AppHandle,
+/// Emit a structured decoder lifecycle event over the scanner status channel.
+fn send_decoder_status(
+    channel: &Channel<DecoderLifecycleEvent>,
     state: &str,
     detail: String,
     recoverable: bool,
     reconnect_attempt: usize,
 ) {
-    let _ = app.emit(
-        "scanner:decoder-status",
-        DecoderLifecycleEvent {
-            state: state.to_string(),
-            detail,
-            recoverable,
-            reconnect_attempt,
-        },
-    );
+    let _ = channel.send(DecoderLifecycleEvent {
+        state: state.to_string(),
+        detail,
+        recoverable,
+        reconnect_attempt,
+    });
 }
 
 /// Build a fresh H.264 decoder instance for a new preview stream session.
@@ -615,11 +657,11 @@ fn reconnect_delay_ms(attempt: usize) -> u64 {
 
 /// Connect to the local forwarded preview socket, retrying briefly when the server is healthy but not yet ready.
 async fn connect_decoder_stream(
-    app: &AppHandle,
     address: &str,
     max_attempts: usize,
     reconnect_attempt: usize,
     detail_prefix: &str,
+    status_channel: &Channel<DecoderLifecycleEvent>,
 ) -> Result<(TcpStream, Arc<Mutex<Decoder>>), String> {
     let mut attempts = 0usize;
 
@@ -631,8 +673,8 @@ async fn connect_decoder_stream(
         match TcpStream::connect(address).await {
             Ok(stream) => {
                 if reconnect_attempt > 0 || attempts > 0 {
-                    emit_decoder_status(
-                        app,
+                    send_decoder_status(
+                        status_channel,
                         "connected",
                         format!(
                             "Decoder connected to {address} after {} reconnect attempt(s).",
@@ -657,8 +699,8 @@ async fn connect_decoder_stream(
                     "{detail_prefix} Connect attempt {attempts}/{max_attempts} failed: {error}. Retrying in {delay_ms}ms."
                 );
                 log::warn!("{detail}");
-                emit_decoder_status(
-                    app,
+                send_decoder_status(
+                    status_channel,
                     "reconnecting",
                     detail,
                     true,

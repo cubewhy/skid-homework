@@ -16,7 +16,10 @@ use std::{
 use std::os::windows::process::CommandExt;
 
 use serde::{Deserialize, Serialize};
-use tauri::command;
+use tauri::{
+    command,
+    ipc::{Channel, InvokeResponseBody},
+};
 
 static ADB_EXECUTABLE: OnceLock<PathBuf> = OnceLock::new();
 
@@ -325,6 +328,16 @@ fn validate_still_capture_payload(
         "{failure_context} was not a JPEG for {serial}: {}",
         describe_binary_payload(&payload)
     ))
+}
+
+fn send_raw_payload(
+    channel: &Channel<InvokeResponseBody>,
+    bytes: Vec<u8>,
+    context: &str,
+) -> Result<(), String> {
+    channel
+        .send(InvokeResponseBody::Raw(bytes))
+        .map_err(|error| format!("Failed to deliver {context} to the frontend: {error}"))
 }
 
 fn capture_still_via_exec_out_stdout(
@@ -817,7 +830,10 @@ pub async fn tauri_adb_connect(request: AdbConnectRequest) -> Result<AdbConnectR
 
 /// Capture a PNG screenshot from the selected device using `exec-out screencap -p`.
 #[command]
-pub async fn tauri_adb_screenshot(serial: String) -> Result<tauri::ipc::Response, String> {
+pub async fn tauri_adb_screenshot(
+    serial: String,
+    payload_channel: Channel<InvokeResponseBody>,
+) -> Result<(), String> {
     let png_bytes = tauri::async_runtime::spawn_blocking(move || {
         let serial = ensure_non_empty(&serial, "ADB serial")?;
 
@@ -839,7 +855,7 @@ pub async fn tauri_adb_screenshot(serial: String) -> Result<tauri::ipc::Response
     .await
     .map_err(|error| format!("ADB screenshot task failed: {error}"))?;
 
-    Ok(tauri::ipc::Response::new(png_bytes?))
+    send_raw_payload(&payload_channel, png_bytes?, "ADB screenshot")
 }
 
 /// Capture a full-resolution still image from the Android camera pipeline.
@@ -848,7 +864,8 @@ pub async fn tauri_adb_capture_still(
     serial: String,
     classpath: String,
     socket_name: String,
-) -> Result<tauri::ipc::Response, String> {
+    payload_channel: Channel<InvokeResponseBody>,
+) -> Result<(), String> {
     let jpeg_bytes: Result<Vec<u8>, String> = tauri::async_runtime::spawn_blocking(move || {
         let serial = ensure_non_empty(&serial, "ADB serial")?;
         let classpath = ensure_non_empty(&classpath, "Server classpath")?;
@@ -887,18 +904,25 @@ pub async fn tauri_adb_capture_still(
     .await
     .map_err(|error| format!("ADB still-capture task failed: {error}"))?;
 
-    Ok(tauri::ipc::Response::new(jpeg_bytes?))
+    send_raw_payload(&payload_channel, jpeg_bytes?, "ADB still capture")
 }
 
 /// Capture a full-resolution still image over a persistent forwarded still-stream socket.
 #[command]
-pub async fn tauri_adb_capture_still_stream(port: u16) -> Result<tauri::ipc::Response, String> {
+pub async fn tauri_adb_capture_still_stream(
+    port: u16,
+    payload_channel: Channel<InvokeResponseBody>,
+) -> Result<(), String> {
     let jpeg_bytes: Result<Vec<u8>, String> =
         tauri::async_runtime::spawn_blocking(move || capture_still_via_forwarded_socket(port))
             .await
             .map_err(|error| format!("ADB forwarded still-stream task failed: {error}"))?;
 
-    Ok(tauri::ipc::Response::new(jpeg_bytes?))
+    send_raw_payload(
+        &payload_channel,
+        jpeg_bytes?,
+        "ADB forwarded still-stream capture",
+    )
 }
 
 /// Execute an arbitrary shell command on the selected device.

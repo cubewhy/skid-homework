@@ -12,7 +12,16 @@ export interface TauriAdbConnectResult {
 }
 
 export interface TauriDecodeStreamHandle {
-  channel: unknown;
+  frameChannel: unknown;
+  statusChannel: unknown;
+  dispose: () => void;
+}
+
+export interface TauriDecodeStreamLifecycleEvent {
+  state: "starting" | "connected" | "reconnecting" | "ready" | "error" | "stopped";
+  detail: string;
+  recoverable: boolean;
+  reconnectAttempt: number;
 }
 
 export interface TauriAdbPairRequest {
@@ -26,6 +35,8 @@ export interface TauriAdbStillPayload {
   transport: string;
 }
 
+type TauriRawChannelPayload = string | ArrayBuffer | Uint8Array | number[];
+
 const invokeTauriCommand = async <T>(
   command: string,
   payload?: Record<string, unknown>,
@@ -38,19 +49,85 @@ const invokeTauriCommand = async <T>(
   return await invoke<T>(command, payload);
 };
 
-const invokeTauriBinaryCommand = async (
+const decodeBase64ToUint8Array = (base64: string): Uint8Array => {
+  const normalized = base64.replace(/\s+/g, "");
+  const binary = atob(normalized);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes;
+};
+
+const normalizeTauriRawChannelPayload = (payload: TauriRawChannelPayload): Uint8Array => {
+  if (typeof payload === "string") {
+    return decodeBase64ToUint8Array(payload);
+  }
+
+  if (payload instanceof ArrayBuffer) {
+    return new Uint8Array(payload);
+  }
+
+  if (payload instanceof Uint8Array) {
+    return payload;
+  }
+
+  if (Array.isArray(payload)) {
+    return Uint8Array.from(payload);
+  }
+
+  throw new Error("Invalid binary payload from Tauri channel.");
+};
+
+const invokeTauriBinaryChannelCommand = async (
   command: string,
   payload?: Record<string, unknown>,
+  channelKey: string = "payloadChannel",
 ): Promise<Uint8Array> => {
-  const result = await invokeTauriCommand<unknown>(command, payload);
-  if (result instanceof ArrayBuffer) {
-    return new Uint8Array(result);
-  } else if (result instanceof Uint8Array) {
-    return result;
-  } else if (Array.isArray(result)) {
-    return Uint8Array.from(result as number[]);
+  if (!isTauri()) {
+    throw new Error("Native binary channel IPC is only available in Tauri desktop builds.");
   }
-  throw new Error("Invalid binary response from Tauri command");
+
+  const { invoke, Channel } = await import("@tauri-apps/api/core");
+
+  return await new Promise<Uint8Array>((resolve, reject) => {
+    let settled = false;
+
+    const settleResolve = (bytes: Uint8Array): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      resolve(bytes);
+    };
+
+    const settleReject = (error: unknown): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+
+    const payloadChannel = new Channel<TauriRawChannelPayload>((message) => {
+      try {
+        settleResolve(normalizeTauriRawChannelPayload(message));
+      } catch (error) {
+        settleReject(error);
+      }
+    });
+
+    void invoke<void>(command, {
+      ...(payload ?? {}),
+      [channelKey]: payloadChannel,
+    }).catch((error) => {
+      settleReject(error);
+    });
+  });
 };
 
 export const listTauriAdbDevices = async (): Promise<TauriAdbDevice[]> => {
@@ -74,7 +151,7 @@ export const connectTauriAdbDevice = async (
 export const captureTauriAdbScreenshot = async (
   serial: string,
 ): Promise<Uint8Array> => {
-  return invokeTauriBinaryCommand("tauri_adb_screenshot", {
+  return await invokeTauriBinaryChannelCommand("tauri_adb_screenshot", {
     serial,
   });
 };
@@ -84,7 +161,7 @@ export const captureTauriAdbStill = (
   classpath: string,
   socketName: string,
 ): Promise<TauriAdbStillPayload> => {
-  return invokeTauriBinaryCommand("tauri_adb_capture_still", {
+  return invokeTauriBinaryChannelCommand("tauri_adb_capture_still", {
     serial,
     classpath,
     socketName,
@@ -92,7 +169,7 @@ export const captureTauriAdbStill = (
     return {
       mimeType: "image/jpeg",
       bytes,
-      transport: "raw-ipc",
+      transport: "raw-channel",
     };
   });
 };
@@ -100,13 +177,13 @@ export const captureTauriAdbStill = (
 export const captureTauriAdbStillStream = (
   port: number,
 ): Promise<TauriAdbStillPayload> => {
-  return invokeTauriBinaryCommand("tauri_adb_capture_still_stream", {
+  return invokeTauriBinaryChannelCommand("tauri_adb_capture_still_stream", {
     port,
   }).then((bytes) => {
     return {
       mimeType: "image/jpeg",
       bytes,
-      transport: "forwarded-stream",
+      transport: "forwarded-stream-channel",
     };
   });
 };
@@ -184,33 +261,99 @@ export const stopTauriAdbServer = async (
 export const startTauriDecodeStream = async (
   port: number,
   onFrame: (framePacket: ArrayBuffer | Uint8Array) => void,
+  onLifecycleEvent: (event: TauriDecodeStreamLifecycleEvent) => void,
 ): Promise<TauriDecodeStreamHandle> => {
   if (!isTauri()) {
     throw new Error("Tauri decoded frame streaming is only available in Tauri desktop builds.");
   }
 
   const { invoke, Channel } = await import("@tauri-apps/api/core");
-  const frameChannel = new Channel<string | ArrayBuffer | Uint8Array | number[]>(async (framePacket) => {
-    if (typeof framePacket === "string") {
-      const res = await fetch(`data:application/octet-stream;base64,${framePacket}`);
-      const buffer = await res.arrayBuffer();
-      onFrame(buffer);
-    } else {
-      if (Array.isArray(framePacket)) {
-        onFrame(Uint8Array.from(framePacket));
-      } else {
-        onFrame(framePacket);
-      }
+  let latestFramePacket: TauriRawChannelPayload | null = null;
+  let frameDispatchScheduled = false;
+  let disposed = false;
+  let animationFrameId: number | null = null;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const clearScheduledDispatch = (): void => {
+    if (animationFrameId !== null && typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") {
+      window.cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
     }
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+    frameDispatchScheduled = false;
+  };
+
+  const flushLatestFrame = (): void => {
+    frameDispatchScheduled = false;
+    animationFrameId = null;
+    timeoutId = null;
+
+    if (disposed) {
+      latestFramePacket = null;
+      return;
+    }
+
+    const framePacket = latestFramePacket;
+    latestFramePacket = null;
+    if (framePacket === null) {
+      return;
+    }
+
+    onFrame(normalizeTauriRawChannelPayload(framePacket));
+
+    if (latestFramePacket !== null) {
+      scheduleLatestFrameDispatch();
+    }
+  };
+
+  function scheduleLatestFrameDispatch(): void {
+    if (disposed || frameDispatchScheduled) {
+      return;
+    }
+
+    frameDispatchScheduled = true;
+
+    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+      animationFrameId = window.requestAnimationFrame(() => {
+        flushLatestFrame();
+      });
+      return;
+    }
+
+    timeoutId = setTimeout(() => {
+      flushLatestFrame();
+    }, 0);
+  }
+
+  const frameChannel = new Channel<TauriRawChannelPayload>((framePacket) => {
+    if (disposed) {
+      return;
+    }
+
+    latestFramePacket = framePacket;
+    scheduleLatestFrameDispatch();
+  });
+  const statusChannel = new Channel<TauriDecodeStreamLifecycleEvent>((event) => {
+    onLifecycleEvent(event);
   });
 
   await invoke<void>("tauri_scanner_start_stream", {
     port,
     frameChannel,
+    statusChannel,
   });
 
   return {
-    channel: frameChannel,
+    frameChannel,
+    statusChannel,
+    dispose: () => {
+      disposed = true;
+      latestFramePacket = null;
+      clearScheduledDispatch();
+    },
   };
 };
 

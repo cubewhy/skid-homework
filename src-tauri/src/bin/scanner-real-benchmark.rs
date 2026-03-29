@@ -1,14 +1,15 @@
 use std::env;
 use std::io::{ErrorKind, Read, Write};
 use std::net::TcpStream;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use openh264::decoder::Decoder;
 use openh264::formats::YUVSource;
 
 const OVERALL_LOG_INTERVAL_SECS: u64 = 5;
 const SAMPLE_LOG_INTERVAL_FRAMES: u64 = 15;
-const FRAME_CODEC_I420: u8 = 3;
+const FRAME_CODEC_I420_TELEMETRY: u8 = 4;
+const FRAME_PACKET_TELEMETRY_SIZE: usize = 12;
 const DEFAULT_DURATION_SECS: u64 = 20;
 const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 8;
 const DEFAULT_STALL_TIMEOUT_MS: u64 = 5_000;
@@ -121,13 +122,15 @@ fn run() -> Result<(), String> {
 
         match decode_nal_to_preview(&mut decoder, nal_data)? {
             Some(frame) => {
-                let packet = pack_frame_packet(
-                    FRAME_CODEC_I420,
-                    frame.width,
-                    frame.height,
-                    &frame.payload,
-                );
                 if let Some(frontend) = frontend_stream.as_mut() {
+                    let sent_at_epoch_ms = current_epoch_ms()?;
+                    let packet = pack_frame_packet(
+                        FRAME_CODEC_I420_TELEMETRY,
+                        frame.width,
+                        frame.height,
+                        Some((sent_at_epoch_ms, frame_seq as u32)),
+                        &frame.payload,
+                    )?;
                     send_frontend_packet(frontend, &packet)?;
                 }
 
@@ -383,6 +386,15 @@ fn send_frontend_packet(stream: &mut TcpStream, packet: &[u8]) -> Result<(), Str
     Ok(())
 }
 
+fn current_epoch_ms() -> Result<u64, String> {
+    Ok(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| format!("System clock drifted before unix epoch: {error}"))?
+            .as_millis() as u64,
+    )
+}
+
 fn decode_nal_to_preview(
     decoder: &mut Decoder,
     nal_data: Vec<u8>,
@@ -565,11 +577,28 @@ fn append_downsampled_plane_by_factor(
     }
 }
 
-fn pack_frame_packet(codec: u8, width: u32, height: u32, payload: &[u8]) -> Vec<u8> {
-    let mut packet = Vec::with_capacity(9 + payload.len());
+fn pack_frame_packet(
+    codec: u8,
+    width: u32,
+    height: u32,
+    telemetry: Option<(u64, u32)>,
+    payload: &[u8],
+) -> Result<Vec<u8>, String> {
+    let telemetry_size = if telemetry.is_some() {
+        FRAME_PACKET_TELEMETRY_SIZE
+    } else {
+        0
+    };
+    let mut packet = Vec::with_capacity(9 + telemetry_size + payload.len());
     packet.push(codec);
     packet.extend_from_slice(&width.to_be_bytes());
     packet.extend_from_slice(&height.to_be_bytes());
+    if let Some((sent_at_epoch_ms, sequence)) = telemetry {
+        packet.extend_from_slice(&sent_at_epoch_ms.to_be_bytes());
+        packet.extend_from_slice(&sequence.to_be_bytes());
+    } else if codec == FRAME_CODEC_I420_TELEMETRY {
+        return Err("Telemetry codec requires telemetry metadata.".to_string());
+    }
     packet.extend_from_slice(payload);
-    packet
+    Ok(packet)
 }
