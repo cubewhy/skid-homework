@@ -56,6 +56,14 @@ final class StopReason {
         );
     }
 
+    public static StopReason cameraEnvironmentBlocked(String message) {
+        return new StopReason(
+                "camera_environment_blocked",
+                sanitize(message, "camera environment blocked"),
+                false
+        );
+    }
+
     public static StopReason encoderFailed(String message) {
         return new StopReason(
                 "encoder_failed",

@@ -52,11 +52,14 @@ public final class Server {
         System.out.println("[Server] Resolution: " + config.width + "x" + config.height);
         System.out.println("[Server] Bitrate: " + config.bitrate + ", FPS: " + config.framerate);
         System.out.println("[Server] Camera: " + config.cameraId);
+        System.out.println(
+                "[Server] Defer still surface until capture: " + config.deferStillSurfaceUntilCapture
+        );
 
         AtomicReference<LocalServerSocket> serverSocketRef = new AtomicReference<>();
         AtomicReference<LocalSocket> clientSocketRef = new AtomicReference<>();
         AtomicReference<SocketRelay> relayRef = new AtomicReference<>();
-        AtomicReference<CameraCapture> activeCaptureRef = new AtomicReference<>();
+        AtomicReference<CameraCaptureBackend> activeCaptureRef = new AtomicReference<>();
         SocketRelay relay = null;
         StillCaptureSocketServer stillCaptureServer = null;
         StillCaptureStreamSocketServer stillCaptureStreamServer = null;
@@ -115,7 +118,7 @@ public final class Server {
             stillCaptureServer = new StillCaptureSocketServer(
                     config.stillSocketName,
                     () -> {
-                        CameraCapture activeCapture = activeCaptureRef.get();
+                        CameraCaptureBackend activeCapture = activeCaptureRef.get();
                         if (activeCapture == null) {
                             throw new IllegalStateException("Camera session is not ready for still capture.");
                         }
@@ -126,7 +129,7 @@ public final class Server {
             stillCaptureStreamServer = new StillCaptureStreamSocketServer(
                     config.stillStreamSocketName,
                     (streamOutput) -> {
-                        CameraCapture activeCapture = activeCaptureRef.get();
+                        CameraCaptureBackend activeCapture = activeCaptureRef.get();
                         if (activeCapture == null) {
                             throw new IllegalStateException("Camera session is not ready for streamed still capture.");
                         }
@@ -176,13 +179,14 @@ public final class Server {
     private static StopReason runStreamingLoop(
             ServerConfig config,
             SocketRelay relay,
-            AtomicReference<CameraCapture> activeCaptureRef,
+            AtomicReference<CameraCaptureBackend> activeCaptureRef,
             AtomicBoolean shutdownRequested,
             AtomicReference<StopSignal> activeStopSignal,
             AtomicReference<StopReason> terminalStopReason
     ) throws InterruptedException {
         int consecutiveRecoveries = 0;
         StopReason lastReason = StopReason.fatal("streaming loop exited without a reason");
+        boolean useLegacyPreviewFallback = false;
 
         while (!shutdownRequested.get()) {
             StopReason forcedStop = terminalStopReason.get();
@@ -193,32 +197,60 @@ public final class Server {
             StopSignal sessionStopSignal = new StopSignal();
             activeStopSignal.set(sessionStopSignal);
 
-            VideoEncoder encoder = null;
-            CameraCapture capture = null;
+            PreviewStreamEncoder encoder = null;
+            CameraCaptureBackend capture = null;
             long sessionStartMs = SystemClock.elapsedRealtime();
+            boolean retryWithLegacyPreviewFallback = false;
 
             try {
                 Consumer<StopReason> requestSessionStop = sessionStopSignal::request;
 
-                encoder = new VideoEncoder(
-                        config.width,
-                        config.height,
-                        config.bitrate,
-                        config.framerate,
-                        relay,
-                        requestSessionStop
-                );
-                capture = new CameraCapture(
-                        config.cameraId,
-                        config.width,
-                        config.height,
-                        config.framerate,
-                        encoder.getInputSurface(),
-                        requestSessionStop
-                );
+                if (useLegacyPreviewFallback) {
+                    LegacyCameraCapture legacyCapture = new LegacyCameraCapture(
+                            config.cameraId,
+                            config.width,
+                            config.height,
+                            config.framerate,
+                            requestSessionStop
+                    );
+                    capture = legacyCapture;
+                    capture.start();
+
+                    ByteBufferVideoEncoder legacyEncoder = new ByteBufferVideoEncoder(
+                            legacyCapture.getPreviewWidth(),
+                            legacyCapture.getPreviewHeight(),
+                            config.bitrate,
+                            config.framerate,
+                            relay,
+                            requestSessionStop
+                    );
+                    encoder = legacyEncoder;
+                    legacyCapture.attachEncoder(legacyEncoder);
+                } else {
+                    VideoEncoder surfaceEncoder = new VideoEncoder(
+                            config.width,
+                            config.height,
+                            config.bitrate,
+                            config.framerate,
+                            relay,
+                            requestSessionStop
+                    );
+                    encoder = surfaceEncoder;
+                    capture = new CameraCapture(
+                            config.cameraId,
+                            config.width,
+                            config.height,
+                            config.framerate,
+                            surfaceEncoder.getInputSurface(),
+                            config.deferStillSurfaceUntilCapture,
+                            requestSessionStop
+                    );
+                }
 
                 encoder.start();
-                capture.start();
+                if (!useLegacyPreviewFallback) {
+                    capture.start();
+                }
                 activeCaptureRef.set(capture);
                 System.out.println("[Server] Waiting for first encoded frame...");
                 encoder.awaitFirstFrame(STARTUP_FIRST_FRAME_TIMEOUT_MS);
@@ -227,9 +259,20 @@ public final class Server {
                 sessionStopSignal.await();
             } catch (Exception e) {
                 StopReason startupFailure = classifyStartupFailure(e);
-                sessionStopSignal.request(startupFailure);
-                System.err.println("[Server] Session startup failed: " + startupFailure.getMessage());
-                e.printStackTrace();
+                if (!useLegacyPreviewFallback && isLegacyPreviewFallbackCandidate(startupFailure)) {
+                    useLegacyPreviewFallback = true;
+                    retryWithLegacyPreviewFallback = true;
+                    System.err.println(
+                            "[Server] Camera2 shell path is blocked on this device. "
+                                    + "Retrying with legacy camera preview fallback. Reason: "
+                                    + startupFailure.getMessage()
+                    );
+                    e.printStackTrace();
+                } else {
+                    sessionStopSignal.request(startupFailure);
+                    System.err.println("[Server] Session startup failed: " + startupFailure.getMessage());
+                    e.printStackTrace();
+                }
             } finally {
                 activeStopSignal.compareAndSet(sessionStopSignal, null);
                 activeCaptureRef.compareAndSet(capture, null);
@@ -239,6 +282,10 @@ public final class Server {
                 if (encoder != null) {
                     encoder.stop();
                 }
+            }
+
+            if (retryWithLegacyPreviewFallback) {
+                continue;
             }
 
             lastReason = terminalStopReason.get();
@@ -288,12 +335,48 @@ public final class Server {
     private static StopReason classifyStartupFailure(Exception exception) {
         Throwable cause = exception.getCause() != null ? exception.getCause() : exception;
         String message = cause.getMessage() != null ? cause.getMessage() : exception.toString();
+        String exceptionDetails = describeExceptionChain(exception).toLowerCase();
+
+        if (isDeviceEnvironmentBlocker(exceptionDetails)) {
+            return StopReason.cameraEnvironmentBlocked(
+                    "camera environment blocked on this device: " + message
+            );
+        }
 
         if (exception instanceof IOException || cause instanceof IOException) {
             return StopReason.encoderFailed("encoder startup failed: " + message);
         }
 
         return StopReason.cameraStartFailed("camera pipeline startup failed: " + message);
+    }
+
+    private static boolean isDeviceEnvironmentBlocker(String details) {
+        return details.contains("given calling package android does not match caller's uid")
+                || details.contains("/sys/class/thermal/")
+                || (details.contains("getthermalinfo") && details.contains("permission denied"))
+                || (details.contains("failed to invoke createcapturesession")
+                && details.contains("permission denied"));
+    }
+
+    private static boolean isLegacyPreviewFallbackCandidate(StopReason reason) {
+        return reason != null && "camera_environment_blocked".equals(reason.getCode());
+    }
+
+    private static String describeExceptionChain(Throwable throwable) {
+        StringBuilder builder = new StringBuilder();
+        Throwable current = throwable;
+        while (current != null) {
+            if (builder.length() > 0) {
+                builder.append(" | ");
+            }
+            builder.append(current.getClass().getSimpleName());
+            String message = current.getMessage();
+            if (message != null && !message.trim().isEmpty()) {
+                builder.append(": ").append(message.trim());
+            }
+            current = current.getCause();
+        }
+        return builder.toString();
     }
 
     private static boolean shouldResetRecoveryCounter(
@@ -413,6 +496,9 @@ public final class Server {
                 case "--camera":
                     config.cameraId = args[++i];
                     break;
+                case "--defer-still-surface":
+                    config.deferStillSurfaceUntilCapture = true;
+                    break;
                 default:
                     System.err.println("[Server] Unknown argument: " + args[i]);
                     break;
@@ -438,6 +524,7 @@ public final class Server {
         int bitrate = DEFAULT_BITRATE;
         int framerate = DEFAULT_FRAMERATE;
         String cameraId = DEFAULT_CAMERA_ID;
+        boolean deferStillSurfaceUntilCapture = false;
     }
 
     private static String defaultStillSocketName(String previewSocketName) {

@@ -21,7 +21,7 @@ import java.util.function.Consumer;
  * provides an input {@link Surface} for the camera to render into, and
  * forwards encoded H.264 NAL units to a {@link SocketRelay}.
  */
-public final class VideoEncoder {
+public final class VideoEncoder implements PreviewStreamEncoder {
 
     private static final String MIME_TYPE = "video/avc"; // H.264
     private static final int I_FRAME_INTERVAL = 2; // seconds between keyframes

@@ -21,10 +21,12 @@ import android.util.Size;
 import android.view.Surface;
 
 import java.io.ByteArrayOutputStream;
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -37,7 +39,7 @@ import java.util.function.Consumer;
  * <p>Since this runs via {@code app_process} at the shell UID level,
  * camera permissions are bypassed (same approach as scrcpy).
  */
-public final class CameraCapture {
+public final class CameraCapture implements CameraCaptureBackend {
     private static final int CAMERA_OPEN_TIMEOUT_SECONDS = 5;
     private static final int MAX_INTERNAL_CAMERA_RECOVERY_ATTEMPTS = 4;
     private static final long CAMERA_RECOVERY_DELAY_BASE_MS = 150L;
@@ -46,6 +48,7 @@ public final class CameraCapture {
     private static final long STILL_CAPTURE_TIMEOUT_MS = 4_000L;
     private static final byte JPEG_QUALITY = (byte) 95;
     private static final int NORMALIZED_STILL_JPEG_QUALITY = 100;
+    private static final String THERMAL_ZONE_TYPE_PATH = "/sys/class/thermal/thermal_zone0/type";
 
     private final String cameraId;
     private final int width;
@@ -53,6 +56,7 @@ public final class CameraCapture {
     private final int targetFps;
     private final Surface encoderSurface;
     private final Consumer<StopReason> stopCallback;
+    private final boolean deferStillSurfaceUntilCapture;
     private final HandlerThread handlerThread;
     private final Handler handler;
     private final AtomicBoolean stopping = new AtomicBoolean(false);
@@ -77,6 +81,7 @@ public final class CameraCapture {
             int height,
             int targetFps,
             Surface encoderSurface,
+            boolean deferStillSurfaceUntilCapture,
             Consumer<StopReason> stopCallback
     ) {
         this.cameraId = cameraId;
@@ -84,6 +89,7 @@ public final class CameraCapture {
         this.height = height;
         this.targetFps = targetFps;
         this.encoderSurface = encoderSurface;
+        this.deferStillSurfaceUntilCapture = deferStillSurfaceUntilCapture;
         this.stopCallback = stopCallback;
 
         handlerThread = new HandlerThread("CameraThread");
@@ -135,6 +141,12 @@ public final class CameraCapture {
 
             if (activeCamera == null || activeSession == null || activeReader == null) {
                 throw new IllegalStateException("Camera still capture is not ready.");
+            }
+
+            if (deferStillSurfaceUntilCapture) {
+                throw new IllegalStateException(
+                        "Still capture is disabled while startup still surface deferral is enabled."
+                );
             }
 
             clearPendingStillImage(activeReader);
@@ -251,7 +263,7 @@ public final class CameraCapture {
             throw new RuntimeException("Failed to obtain CameraManager system service.");
         }
 
-        cameraCharacteristics = cameraManager.getCameraCharacteristics(cameraId);
+        cameraCharacteristics = CameraSupport.getCameraCharacteristics(cameraManager, cameraId);
     }
 
     @SuppressLint("MissingPermission") // Permissions bypassed at shell UID level
@@ -342,52 +354,80 @@ public final class CameraCapture {
         );
 
         // Create a shared session so preview streaming and still capture use the same camera pipeline.
+        // For diagnostics on devices where shell-only session startup regressed after the shared
+        // still surface was introduced, allow startup to bind only the preview encoder surface.
         long sessionConfigureStartedAtMs = SystemClock.elapsedRealtime();
         CountDownLatch sessionLatch = new CountDownLatch(1);
+        java.util.List<Surface> startupSessionSurfaces = deferStillSurfaceUntilCapture
+                ? Collections.singletonList(encoderSurface)
+                : Arrays.asList(encoderSurface, stillImageReader.getSurface());
 
-        cameraDevice.createCaptureSession(
-                Arrays.asList(encoderSurface, stillImageReader.getSurface()),
-                new CameraCaptureSession.StateCallback() {
-                    @Override
-                    public void onConfigured(CameraCaptureSession session) {
-                        if (stopping.get()) {
-                            try {
-                                session.close();
-                            } catch (RuntimeException e) {
-                                // Ignore session close failures during shutdown.
+        System.out.println(
+                "[Camera] Startup session mode: "
+                        + (deferStillSurfaceUntilCapture ? "preview-only" : "preview+still")
+                        + "."
+        );
+
+        try {
+            cameraDevice.createCaptureSession(
+                    startupSessionSurfaces,
+                    new CameraCaptureSession.StateCallback() {
+                        @Override
+                        public void onConfigured(CameraCaptureSession session) {
+                            if (stopping.get()) {
+                                try {
+                                    session.close();
+                                } catch (RuntimeException e) {
+                                    // Ignore session close failures during shutdown.
+                                }
+                                sessionLatch.countDown();
+                                return;
+                            }
+                            synchronized (cameraLock) {
+                                captureSession = session;
                             }
                             sessionLatch.countDown();
-                            return;
                         }
-                        synchronized (cameraLock) {
-                            captureSession = session;
-                        }
-                        sessionLatch.countDown();
-                    }
 
-                    @Override
-                    public void onConfigureFailed(CameraCaptureSession session) {
-                        System.err.println("[Camera] Session configuration failed.");
-                        if (shouldUseInProcessRecovery()) {
-                            handleRecoverableSessionIssue(
-                                    session,
-                                    StopReason.cameraSessionFailed("camera session configuration failed"),
-                                    "[Camera] Session configuration failed. Attempting in-process camera recovery."
-                            );
-                        } else {
-                            closeCaptureSession(session);
+                        @Override
+                        public void onConfigureFailed(CameraCaptureSession session) {
+                            System.err.println("[Camera] Session configuration failed.");
+                            if (shouldUseInProcessRecovery()) {
+                                handleRecoverableSessionIssue(
+                                        session,
+                                        StopReason.cameraSessionFailed("camera session configuration failed"),
+                                        "[Camera] Session configuration failed. Attempting in-process camera recovery."
+                                );
+                            } else {
+                                closeCaptureSession(session);
+                            }
+                            sessionLatch.countDown();
                         }
-                        sessionLatch.countDown();
-                    }
-                },
-                handler
-        );
+                    },
+                    handler
+            );
+        } catch (RuntimeException e) {
+            throw new RuntimeException(
+                    "failed to invoke createCaptureSession: " + sanitizeExceptionMessage(e),
+                    e
+            );
+        }
 
         if (!sessionLatch.await(CAMERA_OPEN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
             throw new RuntimeException("camera session creation timed out");
         }
 
         if (captureSession == null) {
+            String thermalProbeIssue = detectThermalProbeReadabilityIssue();
+            if (thermalProbeIssue != null) {
+                throw new RuntimeException(
+                        "device thermal probe is not readable: "
+                                + THERMAL_ZONE_TYPE_PATH
+                                + " ("
+                                + thermalProbeIssue
+                                + ")"
+                );
+            }
             throw new RuntimeException("failed to configure camera capture session");
         }
 
@@ -623,6 +663,15 @@ public final class CameraCapture {
             return message.trim();
         }
         return cause.toString();
+    }
+
+    private String detectThermalProbeReadabilityIssue() {
+        try (FileReader reader = new FileReader(THERMAL_ZONE_TYPE_PATH)) {
+            reader.read();
+            return null;
+        } catch (IOException e) {
+            return sanitizeExceptionMessage(e);
+        }
     }
 
     private void closeCurrentPipeline(CameraDevice callbackCamera) {

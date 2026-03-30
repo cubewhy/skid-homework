@@ -198,19 +198,38 @@ fn build_app_process_shell_command(
     command_parts.join(" ")
 }
 
+fn build_scanner_server_kill_script(main_class: &str) -> String {
+    format!(
+        "killed=0; \
+for pid in $(ps -A -o PID,ARGS 2>/dev/null | grep {main_class} | grep -v grep | awk '{{print $1}}'); do \
+  kill \"$pid\" >/dev/null 2>&1 && killed=1; \
+done; \
+sleep 1; \
+for pid in $(ps -A -o PID,ARGS 2>/dev/null | grep {main_class} | grep -v grep | awk '{{print $1}}'); do \
+  kill -9 \"$pid\" >/dev/null 2>&1 && killed=1; \
+done; \
+if [ \"$killed\" -eq 1 ]; then \
+  sleep 1; \
+fi",
+        main_class = shell_single_quote(main_class),
+    )
+}
+
 fn build_scanner_server_start_script(
     classpath: &str,
     main_class: &str,
     server_args: &[String],
 ) -> String {
     let app_process_command = build_app_process_shell_command(classpath, main_class, server_args);
+    let kill_command = build_scanner_server_kill_script(main_class);
 
     format!(
-        "mkdir -p /data/local/tmp; \
+        "{kill_command}; \
 rm -f {pidfile}; \
 : >{logfile}; \
 {} </dev/null >>{logfile} 2>&1 & echo $! > {pidfile}",
         app_process_command,
+        kill_command = kill_command,
         pidfile = shell_single_quote(SCANNER_SERVER_PID_PATH),
         logfile = shell_single_quote(SCANNER_SERVER_LOG_PATH),
     )
@@ -502,6 +521,8 @@ fn build_remote_still_capture_path(serial: &str) -> String {
 }
 
 fn build_scanner_server_stop_script(main_class: &str) -> String {
+    let kill_command = build_scanner_server_kill_script(main_class);
+
     format!(
         "pidfile={pidfile}; \
 stopped=0; \
@@ -512,14 +533,12 @@ if [ -f \"$pidfile\" ]; then \
   fi; \
   rm -f \"$pidfile\"; \
 fi; \
-if command -v pkill >/dev/null 2>&1; then \
-  pkill -f {main_class} >/dev/null 2>&1 && stopped=1; \
-fi; \
+{kill_command}; \
 if [ \"$stopped\" -eq 1 ]; then \
   echo \"Camera server stopped.\"; \
 fi",
         pidfile = shell_single_quote(SCANNER_SERVER_PID_PATH),
-        main_class = shell_single_quote(main_class),
+        kill_command = kill_command,
     )
 }
 
