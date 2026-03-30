@@ -169,6 +169,35 @@ interface Resources {
           },
           "title": "CV 调试"
         },
+        "capture": {
+          "badges": {
+            "crop-off": "裁切关",
+            "crop-on": "裁切开",
+            "enhance-off": "增强关",
+            "enhance-on": "增强开",
+            "error": "失败",
+            "idle": "空闲",
+            "processing": "处理中",
+            "redetect-off": "源图重检关",
+            "redetect-on": "源图重检开",
+            "success": "已完成"
+          },
+          "description": "最近一次文档后处理的分段耗时与输入输出分辨率。",
+          "metrics": {
+            "crop": "透视裁切",
+            "decode": "源图解码",
+            "encode": "结果编码",
+            "enhance": "文档增强",
+            "error": "最近后处理错误",
+            "input-resolution": "输入分辨率",
+            "last-update": "最近后处理更新时间",
+            "output-resolution": "输出分辨率",
+            "redetect": "源图重检",
+            "total": "总耗时",
+            "total-hint": "单次后处理从开始到产出文件"
+          },
+          "title": "后处理计时"
+        },
         "hints": {
           "last-disconnect": "最近断开于 {{time}}",
           "no-disconnect": "当前没有断连记录。",

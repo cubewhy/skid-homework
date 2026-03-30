@@ -8,11 +8,13 @@ import {toast} from "sonner";
 import {Button} from "@/components/ui/button";
 import {Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,} from "@/components/ui/dialog";
 import {
-  applyPerspectiveTransform,
+  applyPerspectiveTransformToImageData,
+  applyPerspectiveTransformToMat,
   createFrameSource,
   DEFAULT_SCANNER_CONFIG,
   detectDocumentContour,
-  enhanceDocumentImage,
+  enhanceDocumentImageData,
+  enhanceDocumentRgbaMatToImageData,
   evaluateFrameMappingCompatibility,
   type FrameSource,
   type FrameSourceState,
@@ -23,7 +25,12 @@ import {
   StabilityTracker,
 } from "@/lib/scanner";
 import {createScannerCvWorkerClient, type ScannerCvWorkerClient} from "@/lib/scanner/cv-worker-client";
-import {decodeBlobToImageData, type OrthogonalRotation, rotateImageData} from "@/lib/scanner/image-data";
+import {
+  decodeBlobToImageData,
+  encodeImageDataToPngBlob,
+  type OrthogonalRotation,
+  rotateImageData,
+} from "@/lib/scanner/image-data";
 import {isOpenCvReady} from "@/lib/scanner/opencv-runtime";
 import {orientPointsForPreview} from "@/lib/scanner/preview-orientation";
 import {shellTauriAdbCommand} from "@/lib/tauri/adb";
@@ -36,7 +43,12 @@ import {cn} from "@/lib/utils";
 import OpenCVLoader from "../OpenCVLoader";
 import {ScannerCapturedDocumentEditor} from "./ScannerCapturedDocumentEditor";
 import {ScannerControls} from "./ScannerControls";
-import {ScannerCvDebugCard, ScannerDebugPanel, ScannerPreviewDebugCard,} from "./ScannerDebugPanel";
+import {
+  ScannerCaptureDebugCard,
+  ScannerCvDebugCard,
+  ScannerDebugPanel,
+  ScannerPreviewDebugCard,
+} from "./ScannerDebugPanel";
 import {ScannerOverlay} from "./ScannerOverlay";
 import {ScannerPreviewHud} from "./ScannerPreviewHud";
 
@@ -64,7 +76,18 @@ interface PreparedCaptureArtifact {
   sourceBlob: Blob;
   frame: ImageData;
   points: Point[] | null;
+  outputRotation: OrthogonalRotation;
   source?: string;
+}
+
+interface ProcessedDocumentRenderResult {
+  blob: Blob;
+  outputWidth: number;
+  outputHeight: number;
+  perspectiveMs: number | null;
+  enhanceMs: number | null;
+  rotateMs: number | null;
+  encodeMs: number;
 }
 
 type OptionalDebugFrameSource = FrameSource & {
@@ -80,6 +103,8 @@ const RECOVERABLE_SIGNAL_DEDUPE_MS = 2000;
 const CV_PROCESS_INTERVAL_MS = 120;
 const CV_MAX_WIDTH = 320;
 const CV_MAX_HEIGHT = 180;
+const CAPTURE_CV_MAX_WIDTH = 1024;
+const CAPTURE_CV_MAX_HEIGHT = 1024;
 const AUTO_CAPTURE_STABLE_HOLD_MS = 1200;
 const AUTO_CAPTURE_STABLE_FRAMES = 8;
 const AUTO_CAPTURE_VARIANCE_THRESHOLD = 8;
@@ -150,25 +175,7 @@ const formatDiagnostics = (payload: Record<string, unknown>): string => {
 };
 
 const imageDataToPngBlob = async (frame: ImageData): Promise<Blob> => {
-  const canvas = document.createElement("canvas");
-  canvas.width = frame.width;
-  canvas.height = frame.height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    throw new Error("Could not get temporary canvas context.");
-  }
-
-  ctx.putImageData(frame, 0, 0);
-
-  return await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob) {
-        resolve(blob);
-      } else {
-        reject(new Error("Failed to encode the frame as PNG."));
-      }
-    }, "image/png");
-  });
+  return await encodeImageDataToPngBlob(frame);
 };
 
 const parseFrontendPerfLog = (value: string): FrontendPerfSample | null => {
@@ -264,6 +271,88 @@ const getCvProcessingSize = (
   };
 };
 
+const getCapturedDocumentProcessingSize = (
+  width: number,
+  height: number,
+): { width: number; height: number } => {
+  const scale = Math.min(
+    1,
+    CAPTURE_CV_MAX_WIDTH / Math.max(1, width),
+    CAPTURE_CV_MAX_HEIGHT / Math.max(1, height),
+  );
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+};
+
+const getRotatedFrameDimensions = (
+  width: number,
+  height: number,
+  rotation: OrthogonalRotation,
+): { width: number; height: number } => {
+  if (rotation === 90 || rotation === 270) {
+    return {
+      width: height,
+      height: width,
+    };
+  }
+
+  return { width, height };
+};
+
+const resolveStillFrameRotation = (
+  previewDimensions: { width: number; height: number },
+  stillDimensions: { width: number; height: number },
+): {
+  rotation: OrthogonalRotation;
+  width: number;
+  height: number;
+  aspectDelta: number;
+} => {
+  let selectedRotation: OrthogonalRotation | null = null;
+  let selectedDimensions: { width: number; height: number } | null = null;
+  let selectedAspectDelta = Number.POSITIVE_INFINITY;
+  let lastCompatibilityReason: string | null = null;
+
+  for (const rotation of STILL_CAPTURE_ROTATION_CANDIDATES) {
+    const candidateDimensions = getRotatedFrameDimensions(
+      stillDimensions.width,
+      stillDimensions.height,
+      rotation,
+    );
+    const compatibility = evaluateFrameMappingCompatibility(
+      previewDimensions,
+      candidateDimensions,
+    );
+
+    if (!compatibility.compatible) {
+      lastCompatibilityReason = compatibility.reason;
+      continue;
+    }
+
+    if (selectedRotation === null || compatibility.aspectDelta < selectedAspectDelta) {
+      selectedRotation = rotation;
+      selectedDimensions = candidateDimensions;
+      selectedAspectDelta = compatibility.aspectDelta;
+    }
+  }
+
+  if (selectedRotation === null || !selectedDimensions) {
+    throw new Error(
+      lastCompatibilityReason
+        ?? `Preview/still mapping is incompatible (${previewDimensions.width}x${previewDimensions.height} -> ${stillDimensions.width}x${stillDimensions.height}).`,
+    );
+  }
+
+  return {
+    rotation: selectedRotation,
+    width: selectedDimensions.width,
+    height: selectedDimensions.height,
+    aspectDelta: selectedAspectDelta,
+  };
+};
+
 const pointsEqual = (left: Point[] | null, right: Point[] | null): boolean => {
   if (left === right) {
     return true;
@@ -276,6 +365,10 @@ const pointsEqual = (left: Point[] | null, right: Point[] | null): boolean => {
   return left.every((point, index) => (
     point.x === right[index]?.x && point.y === right[index]?.y
   ));
+};
+
+const formatPerfMetric = (value: number | null): string => {
+  return value === null ? "—" : value.toFixed(1);
 };
 
 interface ScannerCapturedDocumentThumbnailProps {
@@ -305,7 +398,13 @@ function ScannerCapturedDocumentThumbnail({
       <button
         type="button"
         onClick={() => onEdit(document.id)}
-        className="relative block overflow-hidden rounded border bg-background shadow-sm transition-transform group-hover:scale-[1.02]"
+        className={cn(
+          "relative block overflow-hidden rounded border bg-background shadow-sm transition-transform",
+          document.status === "processing"
+            ? "cursor-wait"
+            : "group-hover:scale-[1.02]",
+        )}
+        disabled={document.status === "processing"}
       >
         {previewUrl ? (
           <>
@@ -859,48 +958,71 @@ export default function ScannerView({
       sourceBlob: await imageDataToPngBlob(exportFrame),
       frame: exportFrame,
       points: exportPoints,
-    };
-  }, []);
-
-  const orientCaptureArtifactToPreview = useCallback(async (
-    frame: ImageData,
-    documentPoints: Point[] | null,
-    originalBlob?: Blob,
-  ): Promise<PreparedCaptureArtifact> => {
-    const exportOrientation = previewOrientationRef.current;
-    const exportFrame = exportOrientation === "portrait"
-      ? rotateImageData(frame, 90)
-      : frame;
-    const exportPoints = documentPoints && documentPoints.length === 4
-      ? (
-          exportOrientation === "portrait"
-            ? orientPointsForPreview(documentPoints, frame.width, frame.height, "portrait")
-            : documentPoints
-        )
-      : null;
-
-    return {
-      sourceBlob: originalBlob && exportFrame === frame
-        ? originalBlob
-        : await imageDataToPngBlob(exportFrame),
-      frame: exportFrame,
-      points: exportPoints,
+      outputRotation: 0,
     };
   }, []);
 
   const renderProcessedDocumentBlob = useCallback(async (
     frame: ImageData,
     documentPoints: Point[] | null,
-  ): Promise<Blob> => {
-    const baseBlob = documentPoints && documentPoints.length === 4
-      ? await applyPerspectiveTransform(frame, documentPoints)
-      : await imageDataToPngBlob(frame);
+    outputRotation: OrthogonalRotation = 0,
+  ): Promise<ProcessedDocumentRenderResult> => {
+    let baseImage = frame;
+    let perspectiveMs: number | null = null;
+    let enhanceMs: number | null = null;
+    let rotateMs: number | null = null;
 
-    if (!imageEnhancement) {
-      return baseBlob;
+    const finalizeOutputBlob = async (resultImage: ImageData): Promise<ProcessedDocumentRenderResult> => {
+      const outputImage = outputRotation === 0
+        ? resultImage
+        : (() => {
+            const rotateStartedAt = performance.now();
+            const rotatedImage = rotateImageData(resultImage, outputRotation);
+            rotateMs = performance.now() - rotateStartedAt;
+            return rotatedImage;
+          })();
+      const encodeStartedAt = performance.now();
+      const blob = await imageDataToPngBlob(outputImage);
+      return {
+        blob,
+        outputWidth: outputImage.width,
+        outputHeight: outputImage.height,
+        perspectiveMs,
+        enhanceMs,
+        rotateMs,
+        encodeMs: performance.now() - encodeStartedAt,
+      };
+    };
+
+    if (imageEnhancement && documentPoints && documentPoints.length === 4) {
+      const perspectiveStartedAt = performance.now();
+      const croppedMat = applyPerspectiveTransformToMat(frame, documentPoints);
+      perspectiveMs = performance.now() - perspectiveStartedAt;
+
+      try {
+        const enhanceStartedAt = performance.now();
+        const enhancedImage = await enhanceDocumentRgbaMatToImageData(croppedMat);
+        enhanceMs = performance.now() - enhanceStartedAt;
+        return await finalizeOutputBlob(enhancedImage);
+      } finally {
+        croppedMat.delete();
+      }
     }
 
-    return await enhanceDocumentImage(baseBlob);
+    if (documentPoints && documentPoints.length === 4) {
+      const perspectiveStartedAt = performance.now();
+      baseImage = applyPerspectiveTransformToImageData(frame, documentPoints);
+      perspectiveMs = performance.now() - perspectiveStartedAt;
+    }
+
+    if (!imageEnhancement) {
+      return await finalizeOutputBlob(baseImage);
+    }
+
+    const enhanceStartedAt = performance.now();
+    const enhancedImage = await enhanceDocumentImageData(baseImage);
+    enhanceMs = performance.now() - enhanceStartedAt;
+    return await finalizeOutputBlob(enhancedImage);
   }, [imageEnhancement]);
 
   const logHighQualityStillFailureDiagnostics = useCallback(async (
@@ -946,10 +1068,16 @@ export default function ScannerView({
     source: FrameSource,
     snapshot: PreviewCaptureSnapshot,
   ): Promise<PreparedCaptureArtifact> => {
+    const totalStartedAt = performance.now();
+    const stillCaptureStartedAt = performance.now();
     const stillCapture = await source.captureStillFrame();
+    const stillCaptureMs = performance.now() - stillCaptureStartedAt;
     let decodedStillFrame: ImageData;
+    let decodeMs: number | null = null;
     try {
+      const decodeStartedAt = performance.now();
       decodedStillFrame = await decodeBlobToImageData(stillCapture.file);
+      decodeMs = performance.now() - decodeStartedAt;
     } catch (error) {
       await logHighQualityStillFailureDiagnostics(stillCapture, error);
       const fallbackReason = error instanceof Error ? error.message : String(error);
@@ -959,59 +1087,61 @@ export default function ScannerView({
       width: snapshot.frame.width,
       height: snapshot.frame.height,
     };
-
-    let selectedStillFrame: ImageData | null = null;
-    let selectedAspectDelta = Number.POSITIVE_INFINITY;
-    let lastCompatibilityReason: string | null = null;
-
-    for (const rotation of STILL_CAPTURE_ROTATION_CANDIDATES) {
-      const candidateFrame = rotation === 0
-        ? decodedStillFrame
-        : rotateImageData(decodedStillFrame, rotation);
-      const compatibility = evaluateFrameMappingCompatibility(previewDimensions, {
-        width: candidateFrame.width,
-        height: candidateFrame.height,
-      });
-
-      if (!compatibility.compatible) {
-        lastCompatibilityReason = compatibility.reason;
-        continue;
-      }
-
-      if (
-        !selectedStillFrame
-        || compatibility.aspectDelta < selectedAspectDelta
-      ) {
-        selectedStillFrame = candidateFrame;
-        selectedAspectDelta = compatibility.aspectDelta;
-      }
-    }
-
-    if (!selectedStillFrame) {
-      throw new Error(
-        lastCompatibilityReason
-          ?? `Preview/still mapping is incompatible (${previewDimensions.width}x${previewDimensions.height} -> ${decodedStillFrame.width}x${decodedStillFrame.height}).`,
-      );
-    }
+    const orientationStartedAt = performance.now();
+    const selectedRotation = resolveStillFrameRotation(previewDimensions, {
+      width: decodedStillFrame.width,
+      height: decodedStillFrame.height,
+    });
+    const selectedStillFrame = selectedRotation.rotation === 0
+      ? decodedStillFrame
+      : rotateImageData(decodedStillFrame, selectedRotation.rotation);
+    const orientationMs = performance.now() - orientationStartedAt;
 
     const mappedPoints = snapshot.points && snapshot.points.length === 4
       ? scalePointsBetweenFrames(snapshot.points, previewDimensions, {
-          width: selectedStillFrame.width,
-          height: selectedStillFrame.height,
+          width: selectedRotation.width,
+          height: selectedRotation.height,
         })
       : null;
+    // Keep the HQ still in source space and defer preview-orientation rotation to async post-process.
+    const outputRotation: OrthogonalRotation = previewOrientationRef.current === "portrait" ? 90 : 0;
+    let sourceBlob: Blob = stillCapture.file;
+    let sourceBlobMode = "original";
+    let sourceEncodeMs: number | null = null;
 
-    const artifact = await orientCaptureArtifactToPreview(
-      selectedStillFrame,
-      mappedPoints,
-      selectedStillFrame === decodedStillFrame ? stillCapture.file : undefined,
+    if (selectedStillFrame !== decodedStillFrame) {
+      const sourceEncodeStartedAt = performance.now();
+      sourceBlob = await imageDataToPngBlob(selectedStillFrame);
+      sourceEncodeMs = performance.now() - sourceEncodeStartedAt;
+      sourceBlobMode = "rotated-png";
+    } else if (outputRotation !== 0) {
+      sourceBlobMode = "original-deferred-rotation";
+    }
+
+    const totalMs = performance.now() - totalStartedAt;
+    console.info(
+      `[perf:still-prepare] ${stillCapture.transport} | total=${totalMs.toFixed(1)}ms`
+      + ` capture=${stillCaptureMs.toFixed(1)}ms`
+      + ` decode=${formatPerfMetric(decodeMs)}ms`
+      + ` orient=${orientationMs.toFixed(1)}ms`
+      + ` sourceEncode=${formatPerfMetric(sourceEncodeMs)}ms`
+      + ` rotation=${selectedRotation.rotation}`
+      + ` outputRotation=${outputRotation}`
+      + ` aspectDelta=${selectedRotation.aspectDelta.toFixed(4)}`
+      + ` sourceBlob=${sourceBlobMode}`
+      + ` | preview=${previewDimensions.width}x${previewDimensions.height}`
+      + ` still=${decodedStillFrame.width}x${decodedStillFrame.height}`
+      + ` mapped=${selectedRotation.width}x${selectedRotation.height}`,
     );
 
     return {
-      ...artifact,
+      sourceBlob,
+      frame: selectedStillFrame,
+      points: mappedPoints,
+      outputRotation,
       source: stillCapture.source,
     };
-  }, [logHighQualityStillFailureDiagnostics, orientCaptureArtifactToPreview]);
+  }, [logHighQualityStillFailureDiagnostics]);
 
   const buildCaptureFile = useCallback((blob: Blob, outputNameBase: string): File => {
     const fileExtension = blob.type === "image/jpeg" ? "jpg" : "png";
@@ -1034,7 +1164,11 @@ export default function ScannerView({
     sourceFile: File,
     outputNameBase: string,
     documentPoints: Point[] | null,
+    outputRotation: OrthogonalRotation,
     initialFrame?: ImageData,
+    options?: {
+      redetectPoints?: boolean;
+    },
   ): void => {
     const queueGeneration = capturedDocumentQueueGenerationRef.current;
     const nextVersion = (capturedDocumentProcessVersionsRef.current.get(documentId) ?? 0) + 1;
@@ -1045,11 +1179,64 @@ export default function ScannerView({
       error: null,
       points: clonePoints(documentPoints),
     });
+    setCaptureDebug({
+      postProcessStatus: "processing",
+      postProcessError: null,
+      postProcessDecodeMs: null,
+      postProcessRedetectMs: null,
+      postProcessPerspectiveMs: null,
+      postProcessEnhanceMs: null,
+      postProcessEncodeMs: null,
+      postProcessTotalMs: null,
+      postProcessUsedRedetect: Boolean(options?.redetectPoints),
+      postProcessUsedPerspective: Boolean(documentPoints && documentPoints.length === 4),
+      postProcessUsedEnhancement: imageEnhancement,
+      postProcessInputWidth: initialFrame?.width ?? null,
+      postProcessInputHeight: initialFrame?.height ?? null,
+      postProcessOutputWidth: null,
+      postProcessOutputHeight: null,
+      postProcessUpdatedAt: Date.now(),
+    });
 
     const runProcessing = async (): Promise<void> => {
-      const processingFrame = initialFrame ?? await decodeBlobToImageData(sourceFile);
-      const processedBlob = await renderProcessedDocumentBlob(processingFrame, documentPoints);
-      const processedFile = buildCaptureFile(processedBlob, outputNameBase);
+      const totalStartedAt = performance.now();
+      let decodeMs: number | null = null;
+      const processingFrame = initialFrame ?? await (async () => {
+        const decodeStartedAt = performance.now();
+        const decodedFrame = await decodeBlobToImageData(sourceFile);
+        decodeMs = performance.now() - decodeStartedAt;
+        return decodedFrame;
+      })();
+      let resolvedPoints = clonePoints(documentPoints);
+      let redetectMs: number | null = null;
+
+      if (options?.redetectPoints) {
+        try {
+          const processingSize = getCapturedDocumentProcessingSize(
+            processingFrame.width,
+            processingFrame.height,
+          );
+          const redetectStartedAt = performance.now();
+          const detectedPoints = await detectDocumentContourWithFallback(
+            processingFrame,
+            nextVersion,
+            processingSize,
+          );
+          redetectMs = performance.now() - redetectStartedAt;
+          if (detectedPoints && detectedPoints.length === 4) {
+            resolvedPoints = detectedPoints;
+          }
+        } catch (error) {
+          console.warn("[Scanner] Failed to redetect captured document corners:", error);
+        }
+      }
+
+      const processedDocument = await renderProcessedDocumentBlob(
+        processingFrame,
+        resolvedPoints,
+        outputRotation,
+      );
+      const processedFile = buildCaptureFile(processedDocument.blob, outputNameBase);
 
       if (
         queueGeneration !== capturedDocumentQueueGenerationRef.current
@@ -1060,10 +1247,42 @@ export default function ScannerView({
 
       updateCapturedDocument(documentId, {
         file: processedFile,
-        points: clonePoints(documentPoints),
+        points: clonePoints(resolvedPoints),
         status: "ready",
         error: null,
+        documentDetected: Boolean(resolvedPoints && resolvedPoints.length === 4),
       });
+      const totalMs = performance.now() - totalStartedAt;
+      setCaptureDebug({
+        postProcessStatus: "success",
+        postProcessError: null,
+        postProcessDecodeMs: decodeMs,
+        postProcessRedetectMs: redetectMs,
+        postProcessPerspectiveMs: processedDocument.perspectiveMs,
+        postProcessEnhanceMs: processedDocument.enhanceMs,
+        postProcessEncodeMs: processedDocument.encodeMs,
+        postProcessTotalMs: totalMs,
+        postProcessUsedRedetect: Boolean(options?.redetectPoints),
+        postProcessUsedPerspective: Boolean(resolvedPoints && resolvedPoints.length === 4),
+        postProcessUsedEnhancement: imageEnhancement,
+        postProcessInputWidth: processingFrame.width,
+        postProcessInputHeight: processingFrame.height,
+        postProcessOutputWidth: processedDocument.outputWidth,
+        postProcessOutputHeight: processedDocument.outputHeight,
+        postProcessUpdatedAt: Date.now(),
+      });
+      console.info(
+        `[perf:postprocess] ${outputNameBase} | total=${totalMs.toFixed(1)}ms`
+        + ` decode=${formatPerfMetric(decodeMs)}ms`
+        + ` redetect=${formatPerfMetric(redetectMs)}ms`
+        + ` crop=${formatPerfMetric(processedDocument.perspectiveMs)}ms`
+        + ` enhance=${formatPerfMetric(processedDocument.enhanceMs)}ms`
+        + ` rotate=${formatPerfMetric(processedDocument.rotateMs)}ms`
+        + ` encode=${processedDocument.encodeMs.toFixed(1)}ms`
+        + ` outputRotation=${outputRotation}`
+        + ` | ${processingFrame.width}x${processingFrame.height}`
+        + ` -> ${processedDocument.outputWidth}x${processedDocument.outputHeight}`,
+      );
     };
 
     capturedDocumentQueueRef.current = capturedDocumentQueueRef.current
@@ -1083,9 +1302,22 @@ export default function ScannerView({
           status: "failed",
           error: message,
         });
+        setCaptureDebug({
+          postProcessStatus: "error",
+          postProcessError: message,
+          postProcessUpdatedAt: Date.now(),
+        });
         toast.error(t("toasts.post-process-failed", {message}));
       });
-  }, [buildCaptureFile, renderProcessedDocumentBlob, t, updateCapturedDocument]);
+  }, [
+    buildCaptureFile,
+    detectDocumentContourWithFallback,
+    imageEnhancement,
+    renderProcessedDocumentBlob,
+    setCaptureDebug,
+    t,
+    updateCapturedDocument,
+  ]);
 
   const saveCapturedDocument = useCallback((
     artifact: PreparedCaptureArtifact,
@@ -1102,8 +1334,9 @@ export default function ScannerView({
     });
     const pointsForDocument = clonePoints(artifact.points);
     const needsPostProcessing = Boolean(
-      imageEnhancement
-      || (pointsForDocument && pointsForDocument.length === 4),
+      artifact.outputRotation !== 0
+      || imageEnhancement
+      || (pointsForDocument && pointsForDocument.length === 4)
     );
     const documentId = crypto.randomUUID();
 
@@ -1119,15 +1352,25 @@ export default function ScannerView({
       sourceWidth: artifact.frame.width,
       sourceHeight: artifact.frame.height,
       outputNameBase,
+      outputRotation: artifact.outputRotation,
     });
 
     if (needsPostProcessing) {
+      const shouldRedetectPoints = Boolean(
+        captureSource === "single-hq"
+        && pointsForDocument
+        && pointsForDocument.length === 4,
+      );
       queueCapturedDocumentProcessing(
         documentId,
         sourceFile,
         outputNameBase,
         pointsForDocument,
+        artifact.outputRotation,
         artifact.frame,
+        {
+          redetectPoints: shouldRedetectPoints,
+        },
       );
     }
 
@@ -1572,6 +1815,22 @@ export default function ScannerView({
       lastCaptureWidth: null,
       lastCaptureHeight: null,
       lastCaptureDocumentDetected: false,
+      postProcessStatus: "idle",
+      postProcessError: null,
+      postProcessDecodeMs: null,
+      postProcessRedetectMs: null,
+      postProcessPerspectiveMs: null,
+      postProcessEnhanceMs: null,
+      postProcessEncodeMs: null,
+      postProcessTotalMs: null,
+      postProcessUsedRedetect: false,
+      postProcessUsedPerspective: false,
+      postProcessUsedEnhancement: false,
+      postProcessInputWidth: null,
+      postProcessInputHeight: null,
+      postProcessOutputWidth: null,
+      postProcessOutputHeight: null,
+      postProcessUpdatedAt: null,
     });
 
     let source: FrameSource | null = null;
@@ -1812,8 +2071,13 @@ export default function ScannerView({
   }, [editingCapturedDocumentId, removeCapturedDocument]);
 
   const handleEditCapturedDocument = useCallback((documentId: string) => {
+    const document = capturedDocuments.find((entry) => entry.id === documentId);
+    if (!document || document.status === "processing") {
+      return;
+    }
+
     setEditingCapturedDocumentId(documentId);
-  }, []);
+  }, [capturedDocuments]);
 
   const handleApplyCapturedDocumentEdit = useCallback((
     documentId: string,
@@ -1830,6 +2094,11 @@ export default function ScannerView({
       document.sourceFile,
       document.outputNameBase,
       nextPoints,
+      document.outputRotation,
+      undefined,
+      {
+        redetectPoints: false,
+      },
     );
   }, [capturedDocuments, queueCapturedDocumentProcessing]);
 
@@ -2057,6 +2326,7 @@ export default function ScannerView({
 
                   <div className="flex min-w-0 w-full flex-col gap-4 xl:min-h-0 xl:self-start">
                     <ScannerPreviewDebugCard />
+                    <ScannerCaptureDebugCard />
                   </div>
                 </>
               ) : (

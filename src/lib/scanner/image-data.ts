@@ -1,4 +1,34 @@
+import {isTauri} from "@/lib/tauri/platform";
+
 export type OrthogonalRotation = 0 | 90 | 180 | 270;
+
+type PngEncodeSurface =
+  | {
+    kind: "offscreen";
+    canvas: OffscreenCanvas;
+    context: OffscreenCanvasRenderingContext2D;
+  }
+  | {
+    kind: "dom";
+    canvas: HTMLCanvasElement;
+    context: CanvasRenderingContext2D;
+  };
+
+let pngEncodeSurface: PngEncodeSurface | null = null;
+let pngEncodeQueue: Promise<void> = Promise.resolve();
+let pngEncodeWorkerDisabled = false;
+let pngEncodeNativeDisabled = false;
+
+type PngEncodeWorkerState = {
+  nextRequestId: number;
+  worker: Worker;
+  pending: Map<number, {
+    resolve: (blob: Blob) => void;
+    reject: (error: Error) => void;
+  }>;
+};
+
+let pngEncodeWorkerState: PngEncodeWorkerState | null = null;
 
 const toErrorMessage = (error: unknown): string => {
   return error instanceof Error ? error.message : String(error);
@@ -6,6 +36,231 @@ const toErrorMessage = (error: unknown): string => {
 
 export const cloneImageData = (frame: ImageData): ImageData => {
   return new ImageData(new Uint8ClampedArray(frame.data), frame.width, frame.height);
+};
+
+const getPngEncodeSurface = (
+  width: number,
+  height: number,
+): PngEncodeSurface => {
+  const OffscreenCanvasConstructor = (
+    globalThis as typeof globalThis & {
+      OffscreenCanvas?: typeof OffscreenCanvas;
+    }
+  ).OffscreenCanvas;
+
+  if (typeof OffscreenCanvasConstructor === "function") {
+    if (pngEncodeSurface?.kind !== "offscreen") {
+      const canvas = new OffscreenCanvasConstructor(width, height);
+      const context = canvas.getContext("2d");
+      if (!context) {
+        throw new Error("Could not get reusable offscreen canvas context.");
+      }
+
+      pngEncodeSurface = {
+        kind: "offscreen",
+        canvas,
+        context,
+      };
+    }
+
+    if (pngEncodeSurface.canvas.width !== width) {
+      pngEncodeSurface.canvas.width = width;
+    }
+    if (pngEncodeSurface.canvas.height !== height) {
+      pngEncodeSurface.canvas.height = height;
+    }
+
+    return pngEncodeSurface;
+  }
+
+  if (pngEncodeSurface?.kind !== "dom") {
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("Could not get reusable canvas context.");
+    }
+
+    pngEncodeSurface = {
+      kind: "dom",
+      canvas,
+      context,
+    };
+  }
+
+  if (pngEncodeSurface.canvas.width !== width) {
+    pngEncodeSurface.canvas.width = width;
+  }
+  if (pngEncodeSurface.canvas.height !== height) {
+    pngEncodeSurface.canvas.height = height;
+  }
+
+  return pngEncodeSurface;
+};
+
+const destroyPngEncodeWorker = (): void => {
+  if (!pngEncodeWorkerState) {
+    return;
+  }
+
+  pngEncodeWorkerState.worker.terminate();
+  const pending = [...pngEncodeWorkerState.pending.values()];
+  pngEncodeWorkerState.pending.clear();
+  pngEncodeWorkerState = null;
+
+  for (const request of pending) {
+    request.reject(new Error("PNG encode worker was terminated."));
+  }
+};
+
+const getPngEncodeWorkerState = (): PngEncodeWorkerState | null => {
+  if (pngEncodeWorkerDisabled || typeof Worker !== "function") {
+    return null;
+  }
+
+  if (pngEncodeWorkerState) {
+    return pngEncodeWorkerState;
+  }
+
+  try {
+    const worker = new Worker(new URL("./png-encode.worker.ts", import.meta.url), {
+      type: "module",
+    });
+    const pending = new Map<number, {
+      resolve: (blob: Blob) => void;
+      reject: (error: Error) => void;
+    }>();
+
+    worker.onmessage = (event: MessageEvent<{ id: number; data?: ArrayBuffer; error?: string }>) => {
+      const { id, data, error } = event.data;
+      const request = pending.get(id);
+      if (!request) {
+        return;
+      }
+
+      pending.delete(id);
+
+      if (error) {
+        request.reject(new Error(error));
+        return;
+      }
+
+      if (!data) {
+        request.reject(new Error("PNG encode worker returned no data."));
+        return;
+      }
+
+      request.resolve(new Blob([data], { type: "image/png" }));
+    };
+
+    worker.onerror = (event) => {
+      pngEncodeWorkerDisabled = true;
+      const message = event.message || "PNG encode worker failed.";
+      const requests = [...pending.values()];
+      pending.clear();
+      destroyPngEncodeWorker();
+      for (const request of requests) {
+        request.reject(new Error(message));
+      }
+    };
+
+    pngEncodeWorkerState = {
+      nextRequestId: 1,
+      worker,
+      pending,
+    };
+  } catch {
+    pngEncodeWorkerDisabled = true;
+    return null;
+  }
+
+  return pngEncodeWorkerState;
+};
+
+const encodeImageDataToPngBlobLocally = async (frame: ImageData): Promise<Blob> => {
+  const previousEncode = pngEncodeQueue;
+  let releaseEncode: (() => void) | undefined;
+  pngEncodeQueue = new Promise<void>((resolve) => {
+    releaseEncode = resolve;
+  });
+
+  await previousEncode;
+
+  try {
+    const surface = getPngEncodeSurface(frame.width, frame.height);
+    surface.context.putImageData(frame, 0, 0);
+
+    if (surface.kind === "offscreen") {
+      return await surface.canvas.convertToBlob({ type: "image/png" });
+    }
+
+    return await new Promise<Blob>((resolve, reject) => {
+      surface.canvas.toBlob((blob) => {
+        if (blob) {
+          resolve(blob);
+        } else {
+          reject(new Error("Failed to encode the frame as PNG."));
+        }
+      }, "image/png");
+    });
+  } finally {
+    releaseEncode?.();
+  }
+};
+
+const encodeImageDataToPngBlobViaWorker = async (frame: ImageData): Promise<Blob> => {
+  const workerState = getPngEncodeWorkerState();
+  if (!workerState) {
+    return await encodeImageDataToPngBlobLocally(frame);
+  }
+
+  const requestId = workerState.nextRequestId;
+  workerState.nextRequestId += 1;
+
+  const copiedData = new Uint8ClampedArray(frame.data);
+
+  const blobPromise = new Promise<Blob>((resolve, reject) => {
+    workerState.pending.set(requestId, { resolve, reject });
+  });
+
+  workerState.worker.postMessage({
+    id: requestId,
+    width: frame.width,
+    height: frame.height,
+    data: copiedData.buffer,
+  }, [copiedData.buffer]);
+
+  return await blobPromise;
+};
+
+const encodeImageDataToPngBlobViaNative = async (frame: ImageData): Promise<Blob> => {
+  if (!isTauri()) {
+    throw new Error("Native PNG encode is only available in Tauri desktop builds.");
+  }
+
+  const { encodeTauriPngRgba } = await import("@/lib/tauri/adb");
+  const rgba = new Uint8Array(frame.data);
+  const encodedBytes = await encodeTauriPngRgba(frame.width, frame.height, rgba);
+  return new Blob([new Uint8Array(encodedBytes)], { type: "image/png" });
+};
+
+export const encodeImageDataToPngBlob = async (frame: ImageData): Promise<Blob> => {
+  if (!pngEncodeNativeDisabled && isTauri()) {
+    try {
+      return await encodeImageDataToPngBlobViaNative(frame);
+    } catch (error) {
+      console.warn("[Scanner] Native PNG encode failed, falling back to browser encoder.", error);
+      pngEncodeNativeDisabled = true;
+    }
+  }
+
+  try {
+    return await encodeImageDataToPngBlobViaWorker(frame);
+  } catch (error) {
+    console.warn("[Scanner] PNG encode worker failed, falling back to local encoder.", error);
+    pngEncodeWorkerDisabled = true;
+    destroyPngEncodeWorker();
+    return await encodeImageDataToPngBlobLocally(frame);
+  }
 };
 
 const imageDataToCanvas = (frame: ImageData): HTMLCanvasElement => {

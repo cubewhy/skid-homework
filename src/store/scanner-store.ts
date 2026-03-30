@@ -1,5 +1,6 @@
 import {create} from "zustand";
 import type {FrameSource, Point, ScannerConfig} from "@/lib/scanner";
+import type {OrthogonalRotation} from "@/lib/scanner/image-data";
 
 /**
  * Scanner state management for the ADB camera document scanner.
@@ -20,6 +21,7 @@ export type ScannerHighQualityCaptureStatus =
   | "processing"
   | "success"
   | "error";
+export type ScannerPostProcessStatus = "idle" | "processing" | "success" | "error";
 export type ScannerCvPipeline = "idle" | "preview" | "single-hq";
 
 export interface ScannerPreviewDebugState {
@@ -112,6 +114,38 @@ export interface ScannerCaptureDebugState {
   lastCaptureError: string | null;
   /** Whether the latest capture had a document contour. */
   lastCaptureDocumentDetected: boolean;
+  /** Latest captured-document post-process state. */
+  postProcessStatus: ScannerPostProcessStatus;
+  /** Latest post-process stage error, if any. */
+  postProcessError: string | null;
+  /** Time spent decoding the source image before post-processing. */
+  postProcessDecodeMs: number | null;
+  /** Time spent redetecting document corners on the captured source image. */
+  postProcessRedetectMs: number | null;
+  /** Time spent applying the perspective crop. */
+  postProcessPerspectiveMs: number | null;
+  /** Time spent enhancing the cropped document. */
+  postProcessEnhanceMs: number | null;
+  /** Time spent encoding the final output blob. */
+  postProcessEncodeMs: number | null;
+  /** Total elapsed time for the latest post-processing pass. */
+  postProcessTotalMs: number | null;
+  /** Whether the latest pass attempted a source-image redetect. */
+  postProcessUsedRedetect: boolean;
+  /** Whether the latest pass applied perspective crop. */
+  postProcessUsedPerspective: boolean;
+  /** Whether the latest pass applied enhancement. */
+  postProcessUsedEnhancement: boolean;
+  /** Input width of the latest post-process pass. */
+  postProcessInputWidth: number | null;
+  /** Input height of the latest post-process pass. */
+  postProcessInputHeight: number | null;
+  /** Output width of the latest post-process pass. */
+  postProcessOutputWidth: number | null;
+  /** Output height of the latest post-process pass. */
+  postProcessOutputHeight: number | null;
+  /** Timestamp when the latest post-process metrics were updated. */
+  postProcessUpdatedAt: number | null;
 }
 
 export interface ScannerCapturedDocument {
@@ -137,6 +171,8 @@ export interface ScannerCapturedDocument {
   sourceHeight: number;
   /** Stable filename prefix for regenerated outputs. */
   outputNameBase: string;
+  /** Deferred clockwise rotation that should be applied to the exported output. */
+  outputRotation: OrthogonalRotation;
 }
 
 export interface ScannerState {
@@ -279,6 +315,22 @@ const createInitialCaptureDebugState = (): ScannerCaptureDebugState => ({
   lastCaptureAt: null,
   lastCaptureError: null,
   lastCaptureDocumentDetected: false,
+  postProcessStatus: "idle",
+  postProcessError: null,
+  postProcessDecodeMs: null,
+  postProcessRedetectMs: null,
+  postProcessPerspectiveMs: null,
+  postProcessEnhanceMs: null,
+  postProcessEncodeMs: null,
+  postProcessTotalMs: null,
+  postProcessUsedRedetect: false,
+  postProcessUsedPerspective: false,
+  postProcessUsedEnhancement: false,
+  postProcessInputWidth: null,
+  postProcessInputHeight: null,
+  postProcessOutputWidth: null,
+  postProcessOutputHeight: null,
+  postProcessUpdatedAt: null,
 });
 
 const createInitialState = () => ({

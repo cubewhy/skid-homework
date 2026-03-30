@@ -21,8 +21,16 @@ export type {
 export { buildDocumentContourDetectionOptions, detectDocumentContour } from "./document-detector";
 export type { Point } from "./document-detector";
 export { StabilityTracker } from "./stability-tracker";
-export { applyPerspectiveTransform } from "./perspective-transform";
-export { enhanceDocumentImage } from "./document-enhancer";
+export {
+  applyPerspectiveTransform,
+  applyPerspectiveTransformToImageData,
+  applyPerspectiveTransformToMat,
+} from "./perspective-transform";
+export {
+  enhanceDocumentImage,
+  enhanceDocumentImageData,
+  enhanceDocumentRgbaMatToImageData,
+} from "./document-enhancer";
 export {
   evaluateFrameMappingCompatibility,
   scalePointBetweenFrames,

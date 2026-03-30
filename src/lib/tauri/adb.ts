@@ -188,6 +188,18 @@ export const captureTauriAdbStillStream = (
   });
 };
 
+export const encodeTauriPngRgba = async (
+  width: number,
+  height: number,
+  rgba: Uint8Array,
+): Promise<Uint8Array> => {
+  return await invokeTauriBinaryChannelCommand("tauri_scanner_encode_png_rgba", {
+    width,
+    height,
+    rgba,
+  });
+};
+
 export const shellTauriAdbCommand = async (
   serial: string,
   command: string,

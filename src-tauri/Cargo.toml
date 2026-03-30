@@ -37,6 +37,7 @@ tauri-plugin-opener = "2"
 openh264 = "0.9"
 base64 = "0.22"
 tokio = { version = "1", features = ["net", "io-util", "sync", "macros", "rt", "time"] }
+png = "0.17.16"
 
 # Optimize all dependencies even in dev builds.
 # Without this, CPU-heavy crates like openh264 run ~50x slower

@@ -1,4 +1,5 @@
 mod adb_plugin;
+mod png_bridge;
 mod stream_decoder;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -18,6 +19,7 @@ pub fn run() {
       adb_plugin::tauri_adb_remove_forward,
       adb_plugin::tauri_adb_start_server,
       adb_plugin::tauri_adb_stop_server,
+      png_bridge::tauri_scanner_encode_png_rgba,
       stream_decoder::tauri_scanner_start_stream,
       stream_decoder::tauri_scanner_stop_stream,
     ])

@@ -91,6 +91,21 @@ const getReconnectVariant = (state: string): "default" | "secondary" | "destruct
   }
 };
 
+const getPostProcessVariant = (
+  state: string,
+): "default" | "secondary" | "destructive" | "outline" => {
+  switch (state) {
+    case "success":
+      return "default";
+    case "processing":
+      return "secondary";
+    case "error":
+      return "destructive";
+    default:
+      return "outline";
+  }
+};
+
 interface MetricItemProps {
   label: string;
   value: string;
@@ -118,6 +133,7 @@ const useScannerDebugModel = () => {
   const previewDebug = useScannerStore((state) => state.previewDebug);
   const cvDebug = useScannerStore((state) => state.cvDebug);
   const connectionDebug = useScannerStore((state) => state.connectionDebug);
+  const captureDebug = useScannerStore((state) => state.captureDebug);
   const currentFpsBenchmark = getFpsBenchmarkState(previewDebug.previewFps);
   const recentWindowBenchmark = getFpsBenchmarkState(previewDebug.recentWindowFps);
   const effectiveFpsBenchmark = getFpsBenchmarkState(previewDebug.effectiveFps);
@@ -165,6 +181,7 @@ const useScannerDebugModel = () => {
     previewDebug,
     cvDebug,
     connectionDebug,
+    captureDebug,
     currentFpsBenchmark,
     recentWindowBenchmark,
     effectiveFpsBenchmark,
@@ -408,11 +425,108 @@ export function ScannerCvDebugCard() {
   );
 }
 
+export function ScannerCaptureDebugCard() {
+  const {
+    t,
+    captureDebug,
+  } = useScannerDebugModel();
+
+  return (
+    <Card className="min-w-0 w-full gap-0">
+      <CardHeader className="pb-4">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <TimerReset className="h-4 w-4" />
+          {t("debug.capture.title")}
+        </CardTitle>
+        <CardDescription>
+          {t("debug.capture.description")}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={getPostProcessVariant(captureDebug.postProcessStatus)}>
+            {t(`debug.capture.badges.${captureDebug.postProcessStatus}`)}
+          </Badge>
+          <Badge variant={captureDebug.postProcessUsedRedetect ? "secondary" : "outline"}>
+            {captureDebug.postProcessUsedRedetect
+              ? t("debug.capture.badges.redetect-on")
+              : t("debug.capture.badges.redetect-off")}
+          </Badge>
+          <Badge variant={captureDebug.postProcessUsedPerspective ? "secondary" : "outline"}>
+            {captureDebug.postProcessUsedPerspective
+              ? t("debug.capture.badges.crop-on")
+              : t("debug.capture.badges.crop-off")}
+          </Badge>
+          <Badge variant={captureDebug.postProcessUsedEnhancement ? "secondary" : "outline"}>
+            {captureDebug.postProcessUsedEnhancement
+              ? t("debug.capture.badges.enhance-on")
+              : t("debug.capture.badges.enhance-off")}
+          </Badge>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+          <MetricItem
+            label={t("debug.capture.metrics.total")}
+            value={formatNumber(captureDebug.postProcessTotalMs, 1, " ms")}
+            hint={t("debug.capture.metrics.total-hint")}
+          />
+          <MetricItem
+            label={t("debug.capture.metrics.decode")}
+            value={formatNumber(captureDebug.postProcessDecodeMs, 1, " ms")}
+          />
+          <MetricItem
+            label={t("debug.capture.metrics.redetect")}
+            value={formatNumber(captureDebug.postProcessRedetectMs, 1, " ms")}
+          />
+          <MetricItem
+            label={t("debug.capture.metrics.crop")}
+            value={formatNumber(captureDebug.postProcessPerspectiveMs, 1, " ms")}
+          />
+          <MetricItem
+            label={t("debug.capture.metrics.enhance")}
+            value={formatNumber(captureDebug.postProcessEnhanceMs, 1, " ms")}
+          />
+          <MetricItem
+            label={t("debug.capture.metrics.encode")}
+            value={formatNumber(captureDebug.postProcessEncodeMs, 1, " ms")}
+          />
+          <MetricItem
+            label={t("debug.capture.metrics.input-resolution")}
+            value={formatResolution(
+              captureDebug.postProcessInputWidth,
+              captureDebug.postProcessInputHeight,
+            )}
+          />
+          <MetricItem
+            label={t("debug.capture.metrics.output-resolution")}
+            value={formatResolution(
+              captureDebug.postProcessOutputWidth,
+              captureDebug.postProcessOutputHeight,
+            )}
+          />
+          <MetricItem
+            label={t("debug.capture.metrics.last-update")}
+            value={formatTimestamp(captureDebug.postProcessUpdatedAt)}
+          />
+        </div>
+
+        <Separator />
+
+        <MetricItem
+          label={t("debug.capture.metrics.error")}
+          value={captureDebug.postProcessError ?? "—"}
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
 export function ScannerDebugPanel() {
   return (
     <div className="flex min-w-0 w-full flex-col gap-4">
       <ScannerPreviewDebugCard />
       <ScannerCvDebugCard />
+      <ScannerCaptureDebugCard />
     </div>
   );
 }

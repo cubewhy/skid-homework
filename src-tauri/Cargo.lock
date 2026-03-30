@@ -3638,6 +3638,7 @@ dependencies = [
  "base64 0.22.1",
  "log",
  "openh264",
+ "png",
  "serde",
  "serde_json",
  "tauri",
