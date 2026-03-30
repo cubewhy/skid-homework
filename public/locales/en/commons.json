@@ -449,6 +449,35 @@
         },
         "empty": "No active contour points are available yet. Keep the document inside the preview frame and ensure OpenCV has loaded."
       },
+      "capture": {
+        "title": "Post-Process Timing",
+        "description": "Segment timings and input/output resolutions for the latest captured-document post-process pass.",
+        "badges": {
+          "idle": "Idle",
+          "processing": "Processing",
+          "success": "Done",
+          "error": "Failed",
+          "redetect-on": "Redetect on",
+          "redetect-off": "Redetect off",
+          "crop-on": "Crop on",
+          "crop-off": "Crop off",
+          "enhance-on": "Enhance on",
+          "enhance-off": "Enhance off"
+        },
+        "metrics": {
+          "total": "Total",
+          "total-hint": "Single post-process pass from start to output file",
+          "decode": "Source Decode",
+          "redetect": "Source Redetect",
+          "crop": "Perspective Crop",
+          "enhance": "Document Enhance",
+          "encode": "Output Encode",
+          "input-resolution": "Input Resolution",
+          "output-resolution": "Output Resolution",
+          "last-update": "Last Post-Process Update",
+          "error": "Last Post-Process Error"
+        }
+      },
       "badges": {
         "state": {
           "pass": "PASS",

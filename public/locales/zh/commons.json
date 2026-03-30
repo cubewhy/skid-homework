@@ -447,6 +447,35 @@
         },
         "empty": "当前还没有可用的轮廓点。请将文档保持在预览区域内，并确认 OpenCV 已加载完成。"
       },
+      "capture": {
+        "title": "后处理计时",
+        "description": "最近一次文档后处理的分段耗时与输入输出分辨率。",
+        "badges": {
+          "idle": "空闲",
+          "processing": "处理中",
+          "success": "已完成",
+          "error": "失败",
+          "redetect-on": "源图重检开",
+          "redetect-off": "源图重检关",
+          "crop-on": "裁切开",
+          "crop-off": "裁切关",
+          "enhance-on": "增强开",
+          "enhance-off": "增强关"
+        },
+        "metrics": {
+          "total": "总耗时",
+          "total-hint": "单次后处理从开始到产出文件",
+          "decode": "源图解码",
+          "redetect": "源图重检",
+          "crop": "透视裁切",
+          "enhance": "文档增强",
+          "encode": "结果编码",
+          "input-resolution": "输入分辨率",
+          "output-resolution": "输出分辨率",
+          "last-update": "最近后处理更新时间",
+          "error": "最近后处理错误"
+        }
+      },
       "badges": {
         "state": {
           "pass": "达标",
