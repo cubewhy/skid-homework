@@ -22,6 +22,8 @@ use tokio::time::sleep;
 
 /// Shared flag to signal the decode loop to stop.
 static STREAMING: AtomicBool = AtomicBool::new(false);
+/// Monotonic generation used to invalidate an older decode loop before its task exits.
+static STREAM_SESSION_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Frame counter for periodic perf logging.
 static FRAME_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -86,6 +88,7 @@ pub async fn tauri_scanner_start_stream(
     if STREAMING.swap(true, Ordering::SeqCst) {
         return Err("Stream decoder is already running.".to_string());
     }
+    let session_id = STREAM_SESSION_ID.fetch_add(1, Ordering::SeqCst) + 1;
 
     FRAME_SEQ.store(0, Ordering::Relaxed);
     send_decoder_status(
@@ -97,28 +100,33 @@ pub async fn tauri_scanner_start_stream(
     );
 
     tauri::async_runtime::spawn(async move {
-        let result = decode_stream_loop(port, frame_channel, status_channel.clone()).await;
+        let result = decode_stream_loop(port, frame_channel, status_channel.clone(), session_id).await;
+        let is_current_session = STREAM_SESSION_ID.load(Ordering::SeqCst) == session_id;
 
-        match &result {
-            Ok(DecodeLoopExit::ManualStop) => {
-                send_decoder_status(
-                    &status_channel,
-                    "stopped",
-                    "Stream decoder stopped by request.".to_string(),
-                    false,
-                    0,
-                );
-            }
-            Ok(DecodeLoopExit::RemoteClosed { detail }) => {
-                send_decoder_status(&status_channel, "stopped", detail.clone(), false, 0);
-            }
-            Err(error) => {
-                log::error!("Stream decoder error: {error}");
-                send_decoder_status(&status_channel, "error", error.clone(), false, 0);
+        if is_current_session {
+            match &result {
+                Ok(DecodeLoopExit::ManualStop) => {
+                    send_decoder_status(
+                        &status_channel,
+                        "stopped",
+                        "Stream decoder stopped by request.".to_string(),
+                        false,
+                        0,
+                    );
+                }
+                Ok(DecodeLoopExit::RemoteClosed { detail }) => {
+                    send_decoder_status(&status_channel, "stopped", detail.clone(), false, 0);
+                }
+                Err(error) => {
+                    log::error!("Stream decoder error: {error}");
+                    send_decoder_status(&status_channel, "error", error.clone(), false, 0);
+                }
             }
         }
 
-        STREAMING.store(false, Ordering::SeqCst);
+        if is_current_session {
+            STREAMING.store(false, Ordering::SeqCst);
+        }
     });
 
     Ok(())
@@ -130,6 +138,7 @@ pub async fn tauri_scanner_stop_stream() -> Result<(), String> {
     if !STREAMING.swap(false, Ordering::SeqCst) {
         return Err("No stream decoder is currently running.".to_string());
     }
+    STREAM_SESSION_ID.fetch_add(1, Ordering::SeqCst);
     Ok(())
 }
 
@@ -138,6 +147,7 @@ async fn decode_stream_loop(
     port: u16,
     frame_channel: Channel<InvokeResponseBody>,
     status_channel: Channel<DecoderLifecycleEvent>,
+    session_id: u64,
 ) -> Result<DecodeLoopExit, String> {
     let address = format!("127.0.0.1:{port}");
     let mut reconnect_attempt = 0usize;
@@ -148,6 +158,7 @@ async fn decode_stream_loop(
         reconnect_attempt,
         "Waiting for preview stream to become available.",
         &status_channel,
+        session_id,
     )
     .await?;
 
@@ -156,14 +167,14 @@ async fn decode_stream_loop(
     let mut last_overall_log_sec = 0;
 
     loop {
-        if !STREAMING.load(Ordering::SeqCst) {
+        if !is_stream_session_current(session_id) {
             return Ok(DecodeLoopExit::ManualStop);
         }
 
         let iter_start = Instant::now();
 
         if let Err(error) = stream.read_exact(&mut length_buf).await {
-            if !STREAMING.load(Ordering::SeqCst) {
+            if !is_stream_session_current(session_id) {
                 return Ok(DecodeLoopExit::ManualStop);
             }
 
@@ -205,6 +216,7 @@ async fn decode_stream_loop(
                     reconnect_attempt,
                     "Reconnecting preview stream after socket interruption.",
                     &status_channel,
+                    session_id,
                 )
                 .await?;
                 stream = next_stream;
@@ -228,7 +240,7 @@ async fn decode_stream_loop(
 
         let mut nal_data = vec![0u8; nal_length];
         if let Err(error) = stream.read_exact(&mut nal_data).await {
-            if !STREAMING.load(Ordering::SeqCst) {
+            if !is_stream_session_current(session_id) {
                 return Ok(DecodeLoopExit::ManualStop);
             }
 
@@ -270,6 +282,7 @@ async fn decode_stream_loop(
                     reconnect_attempt,
                     "Reconnecting preview stream after payload interruption.",
                     &status_channel,
+                    session_id,
                 )
                 .await?;
                 stream = next_stream;
@@ -655,6 +668,10 @@ fn reconnect_delay_ms(attempt: usize) -> u64 {
     backoff.min(RECONNECT_RETRY_MAX_DELAY_MS)
 }
 
+fn is_stream_session_current(session_id: u64) -> bool {
+    STREAMING.load(Ordering::SeqCst) && STREAM_SESSION_ID.load(Ordering::SeqCst) == session_id
+}
+
 /// Connect to the local forwarded preview socket, retrying briefly when the server is healthy but not yet ready.
 async fn connect_decoder_stream(
     address: &str,
@@ -662,11 +679,12 @@ async fn connect_decoder_stream(
     reconnect_attempt: usize,
     detail_prefix: &str,
     status_channel: &Channel<DecoderLifecycleEvent>,
+    session_id: u64,
 ) -> Result<(TcpStream, Arc<Mutex<Decoder>>), String> {
     let mut attempts = 0usize;
 
     loop {
-        if !STREAMING.load(Ordering::SeqCst) {
+        if !is_stream_session_current(session_id) {
             return Err("Stream decoder stopped before TCP connect completed.".to_string());
         }
 

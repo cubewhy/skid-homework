@@ -28,12 +28,12 @@ export const buildDocumentContourDetectionOptions = (
   };
 };
 
-const CONTOUR_AREA_MIN_RATIO = 0.06;
+const CONTOUR_AREA_MIN_RATIO = 0.08;
 const CONTOUR_AREA_MAX_RATIO = 0.98;
-const APPROXIMATION_EPSILON_FACTORS = [0.01, 0.015, 0.02, 0.03, 0.04, 0.05] as const;
+const APPROXIMATION_EPSILON_FACTORS = [0.015, 0.02, 0.03, 0.04, 0.05] as const;
 const MAX_SCORING_CONTOURS = 15;
-const MIN_ACCEPTABLE_QUAD_SCORE = 2.05;
-const BORDER_TOUCH_MARGIN_RATIO = 0.015;
+const MIN_ACCEPTABLE_QUAD_SCORE = 2.2;
+const BORDER_TOUCH_MARGIN_RATIO = 0.02;
 
 const clamp = (value: number, min: number, max: number): number => {
   return Math.min(max, Math.max(min, value));

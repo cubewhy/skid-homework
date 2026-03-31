@@ -349,6 +349,10 @@ export const startTauriDecodeStream = async (
     scheduleLatestFrameDispatch();
   });
   const statusChannel = new Channel<TauriDecodeStreamLifecycleEvent>((event) => {
+    if (disposed) {
+      return;
+    }
+
     onLifecycleEvent(event);
   });
 

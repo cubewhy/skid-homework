@@ -12,8 +12,11 @@ const clamp = (value: number, min: number, max: number): number => {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const getOpenCvRuntime = (): any => {
+  const scope = globalThis as typeof globalThis & {
+    cv?: unknown;
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cv = (window as any).cv;
+  const cv = scope.cv as any;
   if (!cv || !cv.Mat) {
     throw new Error("OpenCV.js is not loaded");
   }

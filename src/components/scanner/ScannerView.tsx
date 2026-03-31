@@ -12,8 +12,8 @@ import {
   applyPerspectiveTransformToMat,
   createFrameSource,
   DEFAULT_SCANNER_CONFIG,
-  DetectionPresenceTracker,
   detectDocumentContour,
+  DetectionPresenceTracker,
   enhanceDocumentImageData,
   enhanceDocumentRgbaMatToImageData,
   evaluateFrameMappingCompatibility,
@@ -34,6 +34,10 @@ import {
 } from "@/lib/scanner/image-data";
 import {isOpenCvReady} from "@/lib/scanner/opencv-runtime";
 import {orientPointsForPreview} from "@/lib/scanner/preview-orientation";
+import {
+  createScannerPostProcessWorkerClient,
+  type ScannerPostProcessWorkerClient,
+} from "@/lib/scanner/scanner-postprocess-worker-client";
 import {shellTauriAdbCommand} from "@/lib/tauri/adb";
 import {getSelectedDesktopAdbSerial} from "@/lib/webadb/screenshot";
 import {useBlobDataUrl} from "@/hooks/use-blob-data-url";
@@ -83,6 +87,9 @@ interface PreparedCaptureArtifact {
 
 interface ProcessedDocumentRenderResult {
   blob: Blob;
+  decodeMs: number | null;
+  inputWidth: number;
+  inputHeight: number;
   outputWidth: number;
   outputHeight: number;
   perspectiveMs: number | null;
@@ -101,16 +108,18 @@ const FRONTEND_PERF_LOG_PATTERN =
   /\[perf:frontend\]\s+frame#(\d+)\s+\|\s+ipc=([\d.]+)ms\s+frame_decode=([\d.]+)ms\s+\|\s+([\d.]+)KB\s+\|\s+effective\s+([\d.]+)\s+fps\s+\((\d+)\s+polls\)/i;
 const PREVIEW_CAPTURE_COOLDOWN_MS = 1200;
 const RECOVERABLE_SIGNAL_DEDUPE_MS = 2000;
-const CV_PROCESS_INTERVAL_MS = 80;
-const CV_MAX_WIDTH = 384;
-const CV_MAX_HEIGHT = 216;
+const CV_PROCESS_INTERVAL_MS = 120;
+const CV_MAX_WIDTH = 320;
+const CV_MAX_HEIGHT = 180;
 const CAPTURE_CV_MAX_WIDTH = 1024;
 const CAPTURE_CV_MAX_HEIGHT = 1024;
-const AUTO_CAPTURE_STABLE_HOLD_MS = 750;
-const AUTO_CAPTURE_STABLE_FRAMES = 6;
-const AUTO_CAPTURE_VARIANCE_THRESHOLD = 12;
-const CV_DETECTION_MISS_GRACE_FRAMES = 4;
-const CV_DETECTION_MISS_GRACE_MS = 320;
+const AUTO_CAPTURE_STABLE_HOLD_MS = 1200;
+const AUTO_CAPTURE_STABLE_FRAMES = 8;
+const AUTO_CAPTURE_VARIANCE_THRESHOLD = 8;
+const CV_DETECTION_MISS_GRACE_FRAMES = 3;
+const CV_DETECTION_MISS_GRACE_MS = 360;
+const CV_EFFECTIVE_POINTS_SMOOTHING_THRESHOLD_PX = 18;
+const CV_EFFECTIVE_POINTS_SMOOTHING_FACTOR = 0.35;
 const STILL_CAPTURE_ROTATION_CANDIDATES: readonly OrthogonalRotation[] = [0, 90, 270, 180] as const;
 
 const cloneFrame = (frame: ImageData): ImageData => {
@@ -465,6 +474,7 @@ export default function ScannerView({
   const frameSourceSessionGenerationRef = useRef(0);
   const cvLoopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cvWorkerRef = useRef<ScannerCvWorkerClient | null>(null);
+  const postProcessWorkerRef = useRef<ScannerPostProcessWorkerClient | null>(null);
   const cvWorkerReadyRef = useRef(false);
   const cvDetectionInFlightRef = useRef(false);
   const lastCvFrameVersionRef = useRef(0);
@@ -480,7 +490,12 @@ export default function ScannerView({
   const captureCommitPendingRef = useRef(false);
   const stableSinceRef = useRef<number | null>(null);
   const detectionPresenceTrackerRef = useRef<DetectionPresenceTracker>(
-    new DetectionPresenceTracker(CV_DETECTION_MISS_GRACE_FRAMES, CV_DETECTION_MISS_GRACE_MS),
+    new DetectionPresenceTracker(
+      CV_DETECTION_MISS_GRACE_FRAMES,
+      CV_DETECTION_MISS_GRACE_MS,
+      CV_EFFECTIVE_POINTS_SMOOTHING_THRESHOLD_PX,
+      CV_EFFECTIVE_POINTS_SMOOTHING_FACTOR,
+    ),
   );
   const autoCaptureRef = useRef(true);
   const capturedDocumentProcessVersionsRef = useRef<Map<string, number>>(new Map());
@@ -606,6 +621,12 @@ export default function ScannerView({
     worker?.terminate();
   }, []);
 
+  const terminatePostProcessWorker = useCallback(() => {
+    const worker = postProcessWorkerRef.current;
+    postProcessWorkerRef.current = null;
+    worker?.terminate();
+  }, []);
+
   const ensureCvWorker = useCallback(async (): Promise<ScannerCvWorkerClient | null> => {
     let worker = cvWorkerRef.current;
     if (!worker) {
@@ -622,6 +643,22 @@ export default function ScannerView({
     terminateCvWorker();
     return null;
   }, [terminateCvWorker]);
+
+  const ensurePostProcessWorker = useCallback(async (): Promise<ScannerPostProcessWorkerClient | null> => {
+    let worker = postProcessWorkerRef.current;
+    if (!worker) {
+      worker = createScannerPostProcessWorkerClient();
+      postProcessWorkerRef.current = worker;
+    }
+
+    const ready = await worker.ensureReady();
+    if (ready) {
+      return worker;
+    }
+
+    terminatePostProcessWorker();
+    return null;
+  }, [terminatePostProcessWorker]);
 
   const isCvRuntimeReady = useCallback((): boolean => {
     return isOpenCvReady() || cvWorkerReadyRef.current;
@@ -968,7 +1005,7 @@ export default function ScannerView({
     };
   }, []);
 
-  const renderProcessedDocumentBlob = useCallback(async (
+  const renderProcessedDocumentBlobLocally = useCallback(async (
     frame: ImageData,
     documentPoints: Point[] | null,
     outputRotation: OrthogonalRotation = 0,
@@ -991,6 +1028,9 @@ export default function ScannerView({
       const blob = await imageDataToPngBlob(outputImage);
       return {
         blob,
+        decodeMs: null,
+        inputWidth: frame.width,
+        inputHeight: frame.height,
         outputWidth: outputImage.width,
         outputHeight: outputImage.height,
         perspectiveMs,
@@ -1030,6 +1070,107 @@ export default function ScannerView({
     enhanceMs = performance.now() - enhanceStartedAt;
     return await finalizeOutputBlob(enhancedImage);
   }, [imageEnhancement]);
+
+  const renderProcessedDocumentBlob = useCallback(async (
+    frame: ImageData,
+    documentPoints: Point[] | null,
+    outputRotation: OrthogonalRotation = 0,
+  ): Promise<ProcessedDocumentRenderResult> => {
+    const worker = await ensurePostProcessWorker();
+    if (worker) {
+      try {
+        const workerResult = await worker.process(frame, {
+          documentPoints,
+          outputRotation,
+          imageEnhancement,
+        });
+        const outputImage = new ImageData(
+          new Uint8ClampedArray(workerResult.pixels),
+          workerResult.outputWidth,
+          workerResult.outputHeight,
+        );
+        const encodeStartedAt = performance.now();
+        const blob = await imageDataToPngBlob(outputImage);
+        return {
+          blob,
+          decodeMs: workerResult.decodeMs,
+          inputWidth: workerResult.inputWidth,
+          inputHeight: workerResult.inputHeight,
+          outputWidth: outputImage.width,
+          outputHeight: outputImage.height,
+          perspectiveMs: workerResult.perspectiveMs,
+          enhanceMs: workerResult.enhanceMs,
+          rotateMs: workerResult.rotateMs,
+          encodeMs: performance.now() - encodeStartedAt,
+        };
+      } catch (error) {
+        console.warn("[Scanner] Post-process worker failed, falling back to main thread:", error);
+        terminatePostProcessWorker();
+      }
+    }
+
+    return await renderProcessedDocumentBlobLocally(frame, documentPoints, outputRotation);
+  }, [
+    ensurePostProcessWorker,
+    imageEnhancement,
+    renderProcessedDocumentBlobLocally,
+    terminatePostProcessWorker,
+  ]);
+
+  const renderProcessedDocumentBlobFromSourceFile = useCallback(async (
+    sourceFile: Blob,
+    documentPoints: Point[] | null,
+    outputRotation: OrthogonalRotation = 0,
+  ): Promise<ProcessedDocumentRenderResult> => {
+    const worker = await ensurePostProcessWorker();
+    if (worker) {
+      try {
+        const workerResult = await worker.processSourceFile(sourceFile, {
+          documentPoints,
+          outputRotation,
+          imageEnhancement,
+        });
+        const outputImage = new ImageData(
+          new Uint8ClampedArray(workerResult.pixels),
+          workerResult.outputWidth,
+          workerResult.outputHeight,
+        );
+        const encodeStartedAt = performance.now();
+        const blob = await imageDataToPngBlob(outputImage);
+        return {
+          blob,
+          decodeMs: workerResult.decodeMs,
+          inputWidth: workerResult.inputWidth,
+          inputHeight: workerResult.inputHeight,
+          outputWidth: outputImage.width,
+          outputHeight: outputImage.height,
+          perspectiveMs: workerResult.perspectiveMs,
+          enhanceMs: workerResult.enhanceMs,
+          rotateMs: workerResult.rotateMs,
+          encodeMs: performance.now() - encodeStartedAt,
+        };
+      } catch (error) {
+        console.warn("[Scanner] Post-process worker source decode failed, falling back to main thread:", error);
+        terminatePostProcessWorker();
+      }
+    }
+
+    const decodeStartedAt = performance.now();
+    const decodedFrame = await decodeBlobToImageData(sourceFile);
+    const decodeMs = performance.now() - decodeStartedAt;
+    const localResult = await renderProcessedDocumentBlobLocally(decodedFrame, documentPoints, outputRotation);
+    return {
+      ...localResult,
+      decodeMs,
+      inputWidth: decodedFrame.width,
+      inputHeight: decodedFrame.height,
+    };
+  }, [
+    ensurePostProcessWorker,
+    imageEnhancement,
+    renderProcessedDocumentBlobLocally,
+    terminatePostProcessWorker,
+  ]);
 
   const logHighQualityStillFailureDiagnostics = useCallback(async (
     stillCapture: ScannerStillCapture,
@@ -1178,6 +1319,10 @@ export default function ScannerView({
   ): void => {
     const queueGeneration = capturedDocumentQueueGenerationRef.current;
     const nextVersion = (capturedDocumentProcessVersionsRef.current.get(documentId) ?? 0) + 1;
+    const shouldAttemptRedetect = Boolean(
+      options?.redetectPoints
+      && (!documentPoints || documentPoints.length !== 4),
+    );
     capturedDocumentProcessVersionsRef.current.set(documentId, nextVersion);
 
     updateCapturedDocument(documentId, {
@@ -1190,15 +1335,15 @@ export default function ScannerView({
       postProcessError: null,
       postProcessDecodeMs: null,
       postProcessRedetectMs: null,
-      postProcessPerspectiveMs: null,
-      postProcessEnhanceMs: null,
-      postProcessEncodeMs: null,
-      postProcessTotalMs: null,
-      postProcessUsedRedetect: Boolean(options?.redetectPoints),
-      postProcessUsedPerspective: Boolean(documentPoints && documentPoints.length === 4),
-      postProcessUsedEnhancement: imageEnhancement,
-      postProcessInputWidth: initialFrame?.width ?? null,
-      postProcessInputHeight: initialFrame?.height ?? null,
+        postProcessPerspectiveMs: null,
+        postProcessEnhanceMs: null,
+        postProcessEncodeMs: null,
+        postProcessTotalMs: null,
+        postProcessUsedRedetect: shouldAttemptRedetect,
+        postProcessUsedPerspective: Boolean(documentPoints && documentPoints.length === 4),
+        postProcessUsedEnhancement: imageEnhancement,
+        postProcessInputWidth: initialFrame?.width ?? null,
+        postProcessInputHeight: initialFrame?.height ?? null,
       postProcessOutputWidth: null,
       postProcessOutputHeight: null,
       postProcessUpdatedAt: Date.now(),
@@ -1207,16 +1352,17 @@ export default function ScannerView({
     const runProcessing = async (): Promise<void> => {
       const totalStartedAt = performance.now();
       let decodeMs: number | null = null;
-      const processingFrame = initialFrame ?? await (async () => {
-        const decodeStartedAt = performance.now();
-        const decodedFrame = await decodeBlobToImageData(sourceFile);
-        decodeMs = performance.now() - decodeStartedAt;
-        return decodedFrame;
-      })();
+      let processingFrame = initialFrame ?? null;
       let resolvedPoints = clonePoints(documentPoints);
       let redetectMs: number | null = null;
 
-      if (options?.redetectPoints) {
+      if (shouldAttemptRedetect) {
+        if (!processingFrame) {
+          const decodeStartedAt = performance.now();
+          processingFrame = await decodeBlobToImageData(sourceFile);
+          decodeMs = performance.now() - decodeStartedAt;
+        }
+
         try {
           const processingSize = getCapturedDocumentProcessingSize(
             processingFrame.width,
@@ -1237,11 +1383,20 @@ export default function ScannerView({
         }
       }
 
-      const processedDocument = await renderProcessedDocumentBlob(
-        processingFrame,
-        resolvedPoints,
-        outputRotation,
-      );
+      const processedDocument = processingFrame
+        ? await renderProcessedDocumentBlob(
+            processingFrame,
+            resolvedPoints,
+            outputRotation,
+          )
+        : await renderProcessedDocumentBlobFromSourceFile(
+            sourceFile,
+            resolvedPoints,
+            outputRotation,
+          );
+      const effectiveDecodeMs = decodeMs ?? processedDocument.decodeMs;
+      const inputWidth = processingFrame?.width ?? processedDocument.inputWidth;
+      const inputHeight = processingFrame?.height ?? processedDocument.inputHeight;
       const processedFile = buildCaptureFile(processedDocument.blob, outputNameBase);
 
       if (
@@ -1262,31 +1417,31 @@ export default function ScannerView({
       setCaptureDebug({
         postProcessStatus: "success",
         postProcessError: null,
-        postProcessDecodeMs: decodeMs,
+        postProcessDecodeMs: effectiveDecodeMs,
         postProcessRedetectMs: redetectMs,
         postProcessPerspectiveMs: processedDocument.perspectiveMs,
         postProcessEnhanceMs: processedDocument.enhanceMs,
         postProcessEncodeMs: processedDocument.encodeMs,
         postProcessTotalMs: totalMs,
-        postProcessUsedRedetect: Boolean(options?.redetectPoints),
+        postProcessUsedRedetect: shouldAttemptRedetect,
         postProcessUsedPerspective: Boolean(resolvedPoints && resolvedPoints.length === 4),
         postProcessUsedEnhancement: imageEnhancement,
-        postProcessInputWidth: processingFrame.width,
-        postProcessInputHeight: processingFrame.height,
+        postProcessInputWidth: inputWidth,
+        postProcessInputHeight: inputHeight,
         postProcessOutputWidth: processedDocument.outputWidth,
         postProcessOutputHeight: processedDocument.outputHeight,
         postProcessUpdatedAt: Date.now(),
       });
       console.info(
         `[perf:postprocess] ${outputNameBase} | total=${totalMs.toFixed(1)}ms`
-        + ` decode=${formatPerfMetric(decodeMs)}ms`
+        + ` decode=${formatPerfMetric(effectiveDecodeMs)}ms`
         + ` redetect=${formatPerfMetric(redetectMs)}ms`
         + ` crop=${formatPerfMetric(processedDocument.perspectiveMs)}ms`
         + ` enhance=${formatPerfMetric(processedDocument.enhanceMs)}ms`
         + ` rotate=${formatPerfMetric(processedDocument.rotateMs)}ms`
         + ` encode=${processedDocument.encodeMs.toFixed(1)}ms`
         + ` outputRotation=${outputRotation}`
-        + ` | ${processingFrame.width}x${processingFrame.height}`
+        + ` | ${inputWidth}x${inputHeight}`
         + ` -> ${processedDocument.outputWidth}x${processedDocument.outputHeight}`,
       );
     };
@@ -1320,6 +1475,7 @@ export default function ScannerView({
     detectDocumentContourWithFallback,
     imageEnhancement,
     renderProcessedDocumentBlob,
+    renderProcessedDocumentBlobFromSourceFile,
     setCaptureDebug,
     t,
     updateCapturedDocument,
@@ -1362,11 +1518,6 @@ export default function ScannerView({
     });
 
     if (needsPostProcessing) {
-      const shouldRedetectPoints = Boolean(
-        captureSource === "single-hq"
-        && pointsForDocument
-        && pointsForDocument.length === 4,
-      );
       queueCapturedDocumentProcessing(
         documentId,
         sourceFile,
@@ -1375,7 +1526,9 @@ export default function ScannerView({
         artifact.outputRotation,
         artifact.frame,
         {
-          redetectPoints: shouldRedetectPoints,
+          // Preserve preview-mapped corners; automatic HQ re-detect was overriding
+          // already-accurate points with worse source-image contours.
+          redetectPoints: false,
         },
       );
     }
@@ -1473,6 +1626,9 @@ export default function ScannerView({
           const fallbackReason = lastHighQualityError instanceof Error
             ? lastHighQualityError.message
             : String(lastHighQualityError);
+          const highQualityStillStillAvailable = Boolean(
+            frameSourceRef.current?.getState().capabilities.highQualityStillCapture,
+          );
           console.warn("[Scanner] High-quality still capture failed:", lastHighQualityError);
           setCaptureDebug({
             highQualityStatus: "error",
@@ -1480,7 +1636,7 @@ export default function ScannerView({
             highQualityFallbackReason: fallbackReason,
           });
 
-          if (requiresHighQualitySource) {
+          if (requiresHighQualitySource && highQualityStillStillAvailable) {
             throw new Error(`Scanner capture requires a usable high-quality still source: ${fallbackReason}`);
           }
         }
@@ -1915,6 +2071,7 @@ export default function ScannerView({
       }
 
       void ensureCvWorker();
+      void ensurePostProcessWorker();
       setStatus("streaming");
       setConnectionDebug({
         reconnectState: "connected",
@@ -1947,6 +2104,7 @@ export default function ScannerView({
     clearProcessingCooldown,
     clearCvLoop,
     ensureCvWorker,
+    ensurePostProcessWorker,
     isFrameSourceSessionCurrent,
     invalidatePendingCaptureCommits,
     publishCvDebug,
@@ -1977,6 +2135,7 @@ export default function ScannerView({
     clearCvLoop();
     clearFrameSourceSubscription();
     terminateCvWorker();
+    terminatePostProcessWorker();
 
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
@@ -2048,6 +2207,7 @@ export default function ScannerView({
     setStatus,
     t,
     terminateCvWorker,
+    terminatePostProcessWorker,
   ]);
 
   // Keep a stable ref so the unmount-only cleanup always calls the latest version.

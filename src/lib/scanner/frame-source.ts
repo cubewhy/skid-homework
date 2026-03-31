@@ -16,16 +16,12 @@ import {
   startTauriDecodeStream,
   stopTauriAdbServer,
   stopTauriDecodeStream,
-  type TauriDecodeStreamLifecycleEvent,
   type TauriDecodeStreamHandle,
+  type TauriDecodeStreamLifecycleEvent,
 } from "@/lib/tauri/adb";
 import {isTauri} from "@/lib/tauri/platform";
 
-import {
-  decodeFramePacketToRgba,
-  FRAME_PACKET_HEADER_SIZE,
-  FRAME_PACKET_TELEMETRY_SIZE,
-} from "./frame-codec";
+import {decodeFramePacketToRgba, FRAME_PACKET_HEADER_SIZE, FRAME_PACKET_TELEMETRY_SIZE,} from "./frame-codec";
 
 /** Callback type for receiving decoded preview frames. */
 export type FrameCallback = (frame: ImageData) => void;
@@ -852,6 +848,30 @@ const computeWatchdogThresholdMs = (
   );
 };
 
+const looksLikePreviewSizedStillCapture = (
+  previewWidth: number | null,
+  previewHeight: number | null,
+  stillWidth: number | null,
+  stillHeight: number | null,
+): boolean => {
+  if (
+    previewWidth === null
+    || previewHeight === null
+    || stillWidth === null
+    || stillHeight === null
+  ) {
+    return false;
+  }
+
+  const previewLongEdge = Math.max(previewWidth, previewHeight);
+  const previewShortEdge = Math.min(previewWidth, previewHeight);
+  const stillLongEdge = Math.max(stillWidth, stillHeight);
+  const stillShortEdge = Math.min(stillWidth, stillHeight);
+
+  return stillLongEdge <= previewLongEdge * 1.2
+    && stillShortEdge <= previewShortEdge * 1.2;
+};
+
 const selectRecoveryMode = (
   stopReason: string,
   attempt: number,
@@ -984,6 +1004,7 @@ export class TauriNativeFrameSource implements FrameSource {
   private desiredRunning = false;
   private streamActive = false;
   private previewPauseDepth = 0;
+  private previewPauseStartedAt: number | null = null;
   private forwardActive = false;
   private stillForwardActive = false;
   private serverRunning = false;
@@ -1101,6 +1122,21 @@ export class TauriNativeFrameSource implements FrameSource {
       const dimensions = stillPayload.mimeType === "image/jpeg"
         ? readJpegDimensions(stillBytes)
         : null;
+      const previewWidth = this.state.metrics.previewWidth;
+      const previewHeight = this.state.metrics.previewHeight;
+
+      if (looksLikePreviewSizedStillCapture(
+        previewWidth,
+        previewHeight,
+        dimensions?.width ?? null,
+        dimensions?.height ?? null,
+      )) {
+        const downgradeReason =
+          `High-quality still capture downgraded to preview-sized legacy fallback `
+          + `(${dimensions?.width ?? 0}x${dimensions?.height ?? 0} vs preview ${previewWidth ?? 0}x${previewHeight ?? 0}).`;
+        this.markHighQualityStillCaptureUnavailable(downgradeReason);
+        throw new Error(downgradeReason);
+      }
 
       console.info(
         `[Scanner][StillDiag] Captured high-quality still payload: ${formatStillPayloadDiagnostics({
@@ -1598,8 +1634,22 @@ export class TauriNativeFrameSource implements FrameSource {
   private pausePreviewDelivery(): void {
     this.previewPauseDepth += 1;
     if (this.previewPauseDepth === 1) {
+      this.previewPauseStartedAt = nowMs();
       this.clearWatchdog();
     }
+  }
+
+  private markHighQualityStillCaptureUnavailable(reason: string): void {
+    if (!this.state.capabilities.highQualityStillCapture) {
+      return;
+    }
+
+    this.state.capabilities = {
+      ...this.state.capabilities,
+      highQualityStillCapture: false,
+    };
+    console.warn(`[Scanner][StillDiag] ${reason}`);
+    this.emitState(true);
   }
 
   private resumePreviewDelivery(): void {
@@ -1609,8 +1659,35 @@ export class TauriNativeFrameSource implements FrameSource {
 
     this.previewPauseDepth -= 1;
     if (this.previewPauseDepth === 0 && this.desiredRunning && this.streamActive) {
+      this.refreshWatchdogReferenceAfterPreviewPause();
       this.startWatchdog();
     }
+  }
+
+  private refreshWatchdogReferenceAfterPreviewPause(): void {
+    const pauseStartedAt = this.previewPauseStartedAt;
+    if (pauseStartedAt === null) {
+      return;
+    }
+
+    const resumedAt = nowMs();
+    this.streamStartedAt = resumedAt;
+    if (this.benchmark.totalFrames > 0) {
+      this.benchmark.lastFrameAt = resumedAt;
+      this.state.metrics.lastFrameAt = resumedAt;
+    } else {
+      this.benchmark.lastFrameAt = null;
+      this.state.metrics.lastFrameAt = null;
+    }
+    this.state.metrics.consecutiveEmptyPolls = 0;
+    this.previewPauseStartedAt = null;
+    const pauseDurationMs = Math.max(0, resumedAt - pauseStartedAt);
+    this.suppressUnexpectedEvents(
+      Math.max(
+        computeWatchdogThresholdMs(this.state.metrics.lastFrameAt, this.config.framerate),
+        Math.min(STARTUP_FRAME_GRACE_MS, pauseDurationMs),
+      ),
+    );
   }
 
   private startWatchdog(): void {
@@ -1889,6 +1966,7 @@ export class TauriNativeFrameSource implements FrameSource {
     this.benchmark.lastReconnectDowntimeMs = null;
     this.lastStateEmitAt = 0;
     this.streamStartedAt = null;
+    this.previewPauseStartedAt = null;
     this.decodeTargetRgba = null;
     this.releaseDecodeStreamHandle();
     this.streamActive = false;
