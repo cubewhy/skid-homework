@@ -35,12 +35,56 @@ const EDITOR_DIALOG_MAX_WIDTH_PX = 920;
 const EDITOR_CANVAS_MAX_WIDTH_PX = 760;
 const EDITOR_CANVAS_MAX_HEIGHT_RATIO = 0.62;
 
+type OrthogonalRotation = ScannerCapturedDocument["outputRotation"];
+
 const clonePoints = (points: Point[] | null): Point[] | null => {
   return points?.map((point) => ({...point})) ?? null;
 };
 
 const clamp = (value: number, min: number, max: number): number => {
   return Math.min(max, Math.max(min, value));
+};
+
+const getRotatedDimensions = (
+  width: number,
+  height: number,
+  rotation: OrthogonalRotation,
+): { width: number; height: number } => {
+  if (rotation === 90 || rotation === 270) {
+    return {
+      width: height,
+      height: width,
+    };
+  }
+
+  return { width, height };
+};
+
+const mapDisplayPointToSource = (
+  point: Point,
+  sourceWidth: number,
+  sourceHeight: number,
+  rotation: OrthogonalRotation,
+): Point => {
+  switch (rotation) {
+    case 90:
+      return {
+        x: point.y,
+        y: sourceHeight - point.x,
+      };
+    case 180:
+      return {
+        x: sourceWidth - point.x,
+        y: sourceHeight - point.y,
+      };
+    case 270:
+      return {
+        x: sourceWidth - point.y,
+        y: point.x,
+      };
+    default:
+      return point;
+  }
 };
 
 const buildDefaultPoints = (width: number, height: number): Point[] => {
@@ -80,7 +124,7 @@ const getInitialPoints = (document: ScannerCapturedDocument): Point[] => {
 
 const buildDocumentEditorKey = (document: ScannerCapturedDocument): string => {
   const pointsKey = document.points?.map((point) => `${point.x}:${point.y}`).join("|") ?? "none";
-  return `${document.id}:${document.sourceWidth}x${document.sourceHeight}:${pointsKey}`;
+  return `${document.id}:${document.sourceWidth}x${document.sourceHeight}:${document.outputRotation}:${pointsKey}`;
 };
 
 export function ScannerCapturedDocumentEditor({
@@ -119,6 +163,11 @@ function ScannerCapturedDocumentEditorBody({
   const [draftPoints, setDraftPoints] = useState<Point[]>(() => getInitialPoints(document));
   const [viewportSize, setViewportSize] = useState(() => getViewportSize());
   const sourceUrl = useBlobDataUrl(document.sourceFile);
+  const displayDimensions = getRotatedDimensions(
+    document.sourceWidth,
+    document.sourceHeight,
+    document.outputRotation,
+  );
 
   useEffect(() => {
     const updateViewportSize = (): void => {
@@ -146,14 +195,20 @@ function ScannerCapturedDocumentEditorBody({
     }
 
     const x = clamp(
-      ((event.clientX - rect.left) / rect.width) * document.sourceWidth,
+      ((event.clientX - rect.left) / rect.width) * displayDimensions.width,
       0,
-      document.sourceWidth,
+      displayDimensions.width,
     );
     const y = clamp(
-      ((event.clientY - rect.top) / rect.height) * document.sourceHeight,
+      ((event.clientY - rect.top) / rect.height) * displayDimensions.height,
       0,
+      displayDimensions.height,
+    );
+    const sourcePoint = mapDisplayPointToSource(
+      {x, y},
+      document.sourceWidth,
       document.sourceHeight,
+      document.outputRotation,
     );
 
     setDraftPoints((current) => current.map((point, index) => {
@@ -161,7 +216,10 @@ function ScannerCapturedDocumentEditorBody({
         return point;
       }
 
-      return {x, y};
+      return {
+        x: clamp(sourcePoint.x, 0, document.sourceWidth),
+        y: clamp(sourcePoint.y, 0, document.sourceHeight),
+      };
     }));
   };
 
@@ -217,11 +275,13 @@ function ScannerCapturedDocumentEditorBody({
   );
   const previewScale = Math.min(
     1,
-    availableWidth / Math.max(1, document.sourceWidth),
-    availableHeight / Math.max(1, document.sourceHeight),
+    availableWidth / Math.max(1, displayDimensions.width),
+    availableHeight / Math.max(1, displayDimensions.height),
   );
-  const previewWidth = Math.max(1, Math.round(document.sourceWidth * previewScale));
-  const previewHeight = Math.max(1, Math.round(document.sourceHeight * previewScale));
+  const previewWidth = Math.max(1, Math.round(displayDimensions.width * previewScale));
+  const previewHeight = Math.max(1, Math.round(displayDimensions.height * previewScale));
+  const sourcePreviewWidth = Math.max(1, Math.round(document.sourceWidth * previewScale));
+  const sourcePreviewHeight = Math.max(1, Math.round(document.sourceHeight * previewScale));
 
   return (
     <>
@@ -240,61 +300,71 @@ function ScannerCapturedDocumentEditorBody({
                 height: `${previewHeight}px`,
               }}
             >
-              {sourceUrl ? (
-                <>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={sourceUrl}
-                    alt={t("document-scanner.editor.image-alt")}
-                    className="absolute inset-0 h-full w-full object-fill"
-                    draggable={false}
-                  />
-                </>
-              ) : (
-                <div className="absolute inset-0 bg-muted/20" />
-              )}
-              <svg
-                ref={svgRef}
-                className="absolute inset-0 h-full w-full touch-none"
-                viewBox={`0 0 ${document.sourceWidth} ${document.sourceHeight}`}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-                onPointerCancel={handlePointerUp}
+              <div
+                className="absolute left-1/2 top-1/2"
+                style={{
+                  width: `${sourcePreviewWidth}px`,
+                  height: `${sourcePreviewHeight}px`,
+                  transform: `translate(-50%, -50%) rotate(${document.outputRotation}deg)`,
+                  transformOrigin: "center center",
+                }}
               >
-                <polygon
-                  points={polygonPoints}
-                  fill="rgba(59, 130, 246, 0.18)"
-                  stroke="rgba(96, 165, 250, 0.92)"
-                  strokeWidth={strokeWidth}
-                  strokeLinejoin="round"
-                />
-                {draftPoints.map((point, index) => (
-                  <g key={`editor-corner-${index}`}>
-                    <circle
-                      cx={point.x}
-                      cy={point.y}
-                      r={handleRadius}
-                      fill="white"
-                      stroke="rgba(37, 99, 235, 0.95)"
-                      strokeWidth={Math.max(2, referenceSize * 0.003)}
-                      onPointerDown={(event) => handlePointerDown(index, event)}
+                {sourceUrl ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={sourceUrl}
+                      alt={t("document-scanner.editor.image-alt")}
+                      className="absolute inset-0 h-full w-full object-fill"
+                      draggable={false}
                     />
-                    <text
-                      x={point.x}
-                      y={point.y - handleRadius - Math.max(10, referenceSize * 0.01)}
-                      textAnchor="middle"
-                      fontSize={Math.max(14, referenceSize * 0.018)}
-                      fontWeight="700"
-                      fill="white"
-                      stroke="rgba(0,0,0,0.45)"
-                      strokeWidth={Math.max(1.5, referenceSize * 0.0015)}
-                      paintOrder="stroke"
-                    >
-                      {CORNER_LABELS[index]}
-                    </text>
-                  </g>
-                ))}
-              </svg>
+                  </>
+                ) : (
+                  <div className="absolute inset-0 bg-muted/20" />
+                )}
+                <svg
+                  ref={svgRef}
+                  className="absolute inset-0 h-full w-full touch-none"
+                  viewBox={`0 0 ${document.sourceWidth} ${document.sourceHeight}`}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUp}
+                  onPointerCancel={handlePointerUp}
+                >
+                  <polygon
+                    points={polygonPoints}
+                    fill="rgba(59, 130, 246, 0.18)"
+                    stroke="rgba(96, 165, 250, 0.92)"
+                    strokeWidth={strokeWidth}
+                    strokeLinejoin="round"
+                  />
+                  {draftPoints.map((point, index) => (
+                    <g key={`editor-corner-${index}`}>
+                      <circle
+                        cx={point.x}
+                        cy={point.y}
+                        r={handleRadius}
+                        fill="white"
+                        stroke="rgba(37, 99, 235, 0.95)"
+                        strokeWidth={Math.max(2, referenceSize * 0.003)}
+                        onPointerDown={(event) => handlePointerDown(index, event)}
+                      />
+                      <text
+                        x={point.x}
+                        y={point.y - handleRadius - Math.max(10, referenceSize * 0.01)}
+                        textAnchor="middle"
+                        fontSize={Math.max(14, referenceSize * 0.018)}
+                        fontWeight="700"
+                        fill="white"
+                        stroke="rgba(0,0,0,0.45)"
+                        strokeWidth={Math.max(1.5, referenceSize * 0.0015)}
+                        paintOrder="stroke"
+                      >
+                        {CORNER_LABELS[index]}
+                      </text>
+                    </g>
+                  ))}
+                </svg>
+              </div>
             </div>
           </div>
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import {startTransition, useCallback, useEffect, useMemo, useRef, useState} from "react";
+import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import {Camera, X} from "lucide-react";
 import {useTranslation} from "react-i18next";
 import {toast} from "sonner";
@@ -12,6 +12,7 @@ import {
   applyPerspectiveTransformToMat,
   createFrameSource,
   DEFAULT_SCANNER_CONFIG,
+  DetectionPresenceTracker,
   detectDocumentContour,
   enhanceDocumentImageData,
   enhanceDocumentRgbaMatToImageData,
@@ -100,14 +101,16 @@ const FRONTEND_PERF_LOG_PATTERN =
   /\[perf:frontend\]\s+frame#(\d+)\s+\|\s+ipc=([\d.]+)ms\s+frame_decode=([\d.]+)ms\s+\|\s+([\d.]+)KB\s+\|\s+effective\s+([\d.]+)\s+fps\s+\((\d+)\s+polls\)/i;
 const PREVIEW_CAPTURE_COOLDOWN_MS = 1200;
 const RECOVERABLE_SIGNAL_DEDUPE_MS = 2000;
-const CV_PROCESS_INTERVAL_MS = 120;
-const CV_MAX_WIDTH = 320;
-const CV_MAX_HEIGHT = 180;
+const CV_PROCESS_INTERVAL_MS = 80;
+const CV_MAX_WIDTH = 384;
+const CV_MAX_HEIGHT = 216;
 const CAPTURE_CV_MAX_WIDTH = 1024;
 const CAPTURE_CV_MAX_HEIGHT = 1024;
-const AUTO_CAPTURE_STABLE_HOLD_MS = 1200;
-const AUTO_CAPTURE_STABLE_FRAMES = 8;
-const AUTO_CAPTURE_VARIANCE_THRESHOLD = 8;
+const AUTO_CAPTURE_STABLE_HOLD_MS = 750;
+const AUTO_CAPTURE_STABLE_FRAMES = 6;
+const AUTO_CAPTURE_VARIANCE_THRESHOLD = 12;
+const CV_DETECTION_MISS_GRACE_FRAMES = 4;
+const CV_DETECTION_MISS_GRACE_MS = 320;
 const STILL_CAPTURE_ROTATION_CANDIDATES: readonly OrthogonalRotation[] = [0, 90, 270, 180] as const;
 
 const cloneFrame = (frame: ImageData): ImageData => {
@@ -476,6 +479,9 @@ export default function ScannerView({
   const captureCommitGenerationRef = useRef(0);
   const captureCommitPendingRef = useRef(false);
   const stableSinceRef = useRef<number | null>(null);
+  const detectionPresenceTrackerRef = useRef<DetectionPresenceTracker>(
+    new DetectionPresenceTracker(CV_DETECTION_MISS_GRACE_FRAMES, CV_DETECTION_MISS_GRACE_MS),
+  );
   const autoCaptureRef = useRef(true);
   const capturedDocumentProcessVersionsRef = useRef<Map<string, number>>(new Map());
   const capturedDocumentQueueGenerationRef = useRef(0);
@@ -1548,10 +1554,10 @@ export default function ScannerView({
 
       if (processingRef.current) {
         trackerRef.current.reset();
-        startTransition(() => {
-          setPoints(null);
-          setIsStable(false);
-        });
+        detectionPresenceTrackerRef.current.reset();
+        latestCvSnapshotRef.current = null;
+        setPoints(null);
+        setIsStable(false);
         publishCvDebug(frame, null, false, "preview", true);
         scheduleNextTick(CV_PROCESS_INTERVAL_MS);
         return;
@@ -1585,6 +1591,11 @@ export default function ScannerView({
 
             const stable = trackerRef.current.push(detectedPoints);
             const now = Date.now();
+            const detectionPresenceState = detectionPresenceTrackerRef.current.push(
+              detectedPoints,
+              now,
+            );
+            const effectivePoints = detectionPresenceState.effectivePoints;
             if (!stable || !detectedPoints) {
               stableSinceRef.current = null;
             } else if (stableSinceRef.current === null) {
@@ -1598,16 +1609,16 @@ export default function ScannerView({
               && now - stableSinceRef.current >= AUTO_CAPTURE_STABLE_HOLD_MS,
             );
 
-            latestCvSnapshotRef.current = {
-              frame: frameForDetection,
-              points: clonePoints(detectedPoints),
-            };
+            latestCvSnapshotRef.current = effectivePoints
+              ? {
+                frame: frameForDetection,
+                points: clonePoints(effectivePoints),
+              }
+              : null;
 
-            startTransition(() => {
-              setPoints((current) => (pointsEqual(current, detectedPoints) ? current : detectedPoints));
-              setIsStable((current) => (current === stable ? current : stable));
-            });
-            publishCvDebug(frameForDetection, detectedPoints, stable, "preview", false, processingSize);
+            setPoints((current) => (pointsEqual(current, effectivePoints) ? current : effectivePoints));
+            setIsStable((current) => (current === stable ? current : stable));
+            publishCvDebug(frameForDetection, effectivePoints, stable, "preview", false, processingSize);
 
             if (
               autoCaptureRef.current
@@ -1781,6 +1792,7 @@ export default function ScannerView({
     setConfig(config);
     resetDebugState();
     trackerRef.current.reset();
+    detectionPresenceTrackerRef.current.reset();
     latestCvSnapshotRef.current = null;
     stableSinceRef.current = null;
     setPoints(null);
@@ -1991,6 +2003,7 @@ export default function ScannerView({
     renderedFrameVersionRef.current = 0;
     lastCvFrameVersionRef.current = 0;
     trackerRef.current.reset();
+    detectionPresenceTrackerRef.current.reset();
     latestCvSnapshotRef.current = null;
     stableSinceRef.current = null;
     processingRef.current = false;

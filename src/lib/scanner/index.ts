@@ -22,6 +22,10 @@ export { buildDocumentContourDetectionOptions, detectDocumentContour } from "./d
 export type { Point } from "./document-detector";
 export { StabilityTracker } from "./stability-tracker";
 export {
+  DetectionPresenceTracker,
+  type DetectionPresenceState,
+} from "./detection-presence-tracker";
+export {
   applyPerspectiveTransform,
   applyPerspectiveTransformToImageData,
   applyPerspectiveTransformToMat,

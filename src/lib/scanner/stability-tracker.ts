@@ -8,14 +8,21 @@ export class StabilityTracker {
   private history: Point[][] = [];
   private readonly maxFrames: number;
   private readonly varianceThreshold: number;
+  private readonly maxMissingFrames: number;
+  private missingFrames = 0;
 
   /**
    * @param maxFrames Number of consecutive frames to track.
    * @param varianceThreshold Maximum allowed pixel variance across frames to be considered stable.
    */
-  constructor(maxFrames: number = 5, varianceThreshold: number = 15) {
+  constructor(
+    maxFrames: number = 5,
+    varianceThreshold: number = 15,
+    maxMissingFrames: number = 1,
+  ) {
     this.maxFrames = maxFrames;
     this.varianceThreshold = varianceThreshold;
+    this.maxMissingFrames = Math.max(0, Math.floor(maxMissingFrames));
   }
 
   /**
@@ -25,10 +32,14 @@ export class StabilityTracker {
    */
   public push(points: Point[] | null): boolean {
     if (!points || points.length !== 4) {
-      this.history = [];
+      this.missingFrames += 1;
+      if (this.missingFrames > this.maxMissingFrames) {
+        this.history = [];
+      }
       return false;
     }
 
+    this.missingFrames = 0;
     this.history.push(points);
     if (this.history.length > this.maxFrames) {
       this.history.shift();
@@ -77,5 +88,6 @@ export class StabilityTracker {
 
   public reset(): void {
     this.history = [];
+    this.missingFrames = 0;
   }
 }
