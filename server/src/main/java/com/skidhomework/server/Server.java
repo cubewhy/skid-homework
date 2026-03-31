@@ -29,7 +29,7 @@ public final class Server {
     private static final int DEFAULT_WIDTH = 640;
     private static final int DEFAULT_HEIGHT = 360;
     private static final int DEFAULT_BITRATE = 2_000_000; // 2 Mbps
-    private static final int DEFAULT_FRAMERATE = 60;
+    private static final int DEFAULT_FRAMERATE = 30;
     private static final String DEFAULT_CAMERA_ID = "0"; // Back camera
     private static final int MAX_CONSECUTIVE_PIPELINE_RECOVERIES = 8;
     private static final int MAX_CONSECUTIVE_CAMERA_RECOVERIES = Integer.MAX_VALUE;

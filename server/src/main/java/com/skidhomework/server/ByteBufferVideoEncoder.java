@@ -21,6 +21,7 @@ public final class ByteBufferVideoEncoder implements PreviewStreamEncoder {
 
     private static final String MIME_TYPE = "video/avc";
     private static final int I_FRAME_INTERVAL = 2;
+    private static final String KEY_PREPEND_SPS_PPS_TO_IDR_FRAMES = "prepend-sps-pps-to-idr-frames";
     private static final long STARTUP_SYNC_FRAME_RETRY_MS = 250L;
     private static final long INPUT_BUFFER_TIMEOUT_US = 0L;
 
@@ -66,6 +67,7 @@ public final class ByteBufferVideoEncoder implements PreviewStreamEncoder {
         format.setInteger(MediaFormat.KEY_BIT_RATE, bitrate);
         format.setInteger(MediaFormat.KEY_FRAME_RATE, framerate);
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL);
+        format.setInteger(KEY_PREPEND_SPS_PPS_TO_IDR_FRAMES, 1);
 
         codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
 

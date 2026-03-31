@@ -188,7 +188,7 @@ export const DEFAULT_SCANNER_CONFIG: Omit<ScannerConfig, "serial" | "serverJarPa
   width: 640,
   height: 360,
   bitrate: 2_000_000,
-  framerate: 60,
+  framerate: 30,
   cameraId: "0",
 };
 

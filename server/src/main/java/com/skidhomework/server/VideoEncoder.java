@@ -25,6 +25,7 @@ public final class VideoEncoder implements PreviewStreamEncoder {
 
     private static final String MIME_TYPE = "video/avc"; // H.264
     private static final int I_FRAME_INTERVAL = 2; // seconds between keyframes
+    private static final String KEY_PREPEND_SPS_PPS_TO_IDR_FRAMES = "prepend-sps-pps-to-idr-frames";
     private static final long STARTUP_SYNC_FRAME_RETRY_MS = 250L;
 
     private final MediaCodec codec;
@@ -61,6 +62,7 @@ public final class VideoEncoder implements PreviewStreamEncoder {
         format.setInteger(MediaFormat.KEY_BIT_RATE, bitrate);
         format.setInteger(MediaFormat.KEY_FRAME_RATE, framerate);
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL);
+        format.setInteger(KEY_PREPEND_SPS_PPS_TO_IDR_FRAMES, 1);
 
         codec = MediaCodec.createEncoderByType(MIME_TYPE);
         codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);

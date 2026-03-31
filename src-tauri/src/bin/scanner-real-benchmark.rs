@@ -59,8 +59,11 @@ fn run() -> Result<(), String> {
     let loop_start = Instant::now();
     let mut last_overall_log_sec = 0;
     let mut frame_seq = 0u64;
+    let mut nal_packet_count = 0u64;
     let mut has_seen_first_nal = false;
     let mut length_buf = [0u8; 4];
+    let mut first_packet_summary: Option<String> = None;
+    let mut last_packet_summary: Option<String> = None;
 
     loop {
         if loop_start.elapsed().as_secs() >= args.duration_secs {
@@ -84,7 +87,16 @@ fn run() -> Result<(), String> {
                     )
                 });
             }
-            Ok(StreamReadStatus::Eof) => break,
+            Ok(StreamReadStatus::Eof) => {
+                if frame_seq == 0 {
+                    return Err(format!(
+                        "Preview stream ended before a decodable frame was produced. NAL packets read: {nal_packet_count}. First packet: {}. Last packet: {}.",
+                        first_packet_summary.as_deref().unwrap_or("none"),
+                        last_packet_summary.as_deref().unwrap_or("none"),
+                    ));
+                }
+                break;
+            }
             Err(error) => return Err(format!("Failed to read NAL length: {error}")),
         }
 
@@ -109,7 +121,16 @@ fn run() -> Result<(), String> {
                     )
                 });
             }
-            Ok(StreamReadStatus::Eof) => break,
+            Ok(StreamReadStatus::Eof) => {
+                if frame_seq == 0 {
+                    return Err(format!(
+                        "Preview stream payload ended before a decodable frame was produced. NAL packets read: {nal_packet_count}. First packet: {}. Last packet: {}.",
+                        first_packet_summary.as_deref().unwrap_or("none"),
+                        last_packet_summary.as_deref().unwrap_or("none"),
+                    ));
+                }
+                break;
+            }
             Err(error) => {
                 return Err(format!(
                     "Failed to read NAL data ({nal_length} bytes): {error}"
@@ -119,6 +140,12 @@ fn run() -> Result<(), String> {
 
         let tcp_read_ms = iter_start.elapsed().as_secs_f64() * 1000.0;
         has_seen_first_nal = true;
+        nal_packet_count += 1;
+        let packet_summary = summarize_nal_packet(&nal_data);
+        if first_packet_summary.is_none() {
+            first_packet_summary = Some(packet_summary.clone());
+        }
+        last_packet_summary = Some(packet_summary.clone());
 
         match decode_nal_to_preview(&mut decoder, nal_data)? {
             Some(frame) => {
@@ -151,7 +178,13 @@ fn run() -> Result<(), String> {
 
                 frame_seq += 1;
             }
-            None => {}
+            None => {
+                if nal_packet_count <= 5 {
+                    println!(
+                        "[perf] undecoded_nal#{nal_packet_count} len={nal_length}B | {packet_summary}"
+                    );
+                }
+            }
         }
 
         let elapsed = loop_start.elapsed().as_secs();
@@ -162,14 +195,21 @@ fn run() -> Result<(), String> {
         }
     }
 
-    if frame_seq > 0 {
-        let elapsed_secs = loop_start.elapsed().as_secs_f64();
-        let fps = frame_seq as f64 / elapsed_secs.max(0.001);
-        let elapsed_display = elapsed_secs.max(1.0).round() as u64;
-        println!(
-            "[perf] overall: {frame_seq} frames in {elapsed_display}s = {fps:.1} fps"
-        );
+    let elapsed_secs = loop_start.elapsed().as_secs_f64();
+    let elapsed_display = elapsed_secs.max(1.0).round() as u64;
+
+    if frame_seq == 0 {
+        return Err(format!(
+            "Preview stream ran for {elapsed_display}s and read {nal_packet_count} NAL packets, but decoder produced 0 preview frames. First packet: {}. Last packet: {}.",
+            first_packet_summary.as_deref().unwrap_or("none"),
+            last_packet_summary.as_deref().unwrap_or("none"),
+        ));
     }
+
+    let fps = frame_seq as f64 / elapsed_secs.max(0.001);
+    println!(
+        "[perf] overall: {frame_seq} frames in {elapsed_display}s = {fps:.1} fps | nal_packets={nal_packet_count}"
+    );
 
     Ok(())
 }
@@ -393,6 +433,75 @@ fn current_epoch_ms() -> Result<u64, String> {
             .map_err(|error| format!("System clock drifted before unix epoch: {error}"))?
             .as_millis() as u64,
     )
+}
+
+fn summarize_nal_packet(nal_data: &[u8]) -> String {
+    let head_hex = nal_data
+        .iter()
+        .take(8)
+        .map(|value| format!("{value:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let nal_types = collect_h264_nal_types(nal_data);
+
+    format!(
+        "head=[{head_hex}] annexb={} nal_types={}",
+        contains_start_code(nal_data),
+        if nal_types.is_empty() {
+            "?".to_string()
+        } else {
+            nal_types
+                .iter()
+                .map(|nal_type| nal_type.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        }
+    )
+}
+
+fn collect_h264_nal_types(nal_data: &[u8]) -> Vec<u8> {
+    let mut nal_types = Vec::new();
+
+    if contains_start_code(nal_data) {
+        let mut offset = 0usize;
+        while offset + 3 < nal_data.len() {
+            let Some(start) = find_start_code(nal_data, offset) else {
+                break;
+            };
+            let prefix_len = if nal_data[start..].starts_with(&[0, 0, 0, 1]) {
+                4
+            } else {
+                3
+            };
+            let nal_header_offset = start + prefix_len;
+            if nal_header_offset < nal_data.len() {
+                nal_types.push(nal_data[nal_header_offset] & 0x1f);
+            }
+            offset = nal_header_offset.saturating_add(1);
+        }
+    } else if let Some(first_byte) = nal_data.first() {
+        nal_types.push(first_byte & 0x1f);
+    }
+
+    nal_types
+}
+
+fn contains_start_code(nal_data: &[u8]) -> bool {
+    find_start_code(nal_data, 0).is_some()
+}
+
+fn find_start_code(nal_data: &[u8], offset: usize) -> Option<usize> {
+    if nal_data.len() < 3 || offset >= nal_data.len().saturating_sub(2) {
+        return None;
+    }
+
+    for index in offset..nal_data.len().saturating_sub(2) {
+        if nal_data[index..].starts_with(&[0, 0, 1]) || nal_data[index..].starts_with(&[0, 0, 0, 1]) {
+            return Some(index);
+        }
+    }
+
+    None
 }
 
 fn decode_nal_to_preview(
