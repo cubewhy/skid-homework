@@ -255,17 +255,290 @@
     "pdf-disabled": "仅在启用 Gemini 源或开启 Responses API 的 OpenAI 源时支持 PDF 上传。",
     "adb": {
       "connect": "ADB 连接",
+      "document-scanner": "文档扫描",
       "reconnect": "重新连接 ADB",
       "screenshot": "ADB 截图",
       "connecting": "连接中...",
+      "connected": "已连接到 {{serial}}。",
+      "paired": "配对成功。请再使用设备的连接地址执行连接。",
       "screenshot-busy": "采集中...",
-      "screenshot-hint": "通过 ADB（WebUSB）从已连接的安卓设备捕获屏幕截图",
+      "screenshot-hint": "通过 ADB 从已连接的安卓设备捕获屏幕截图",
       "menu-aria-label": "ADB 操作菜单",
-      "capture-timeout": "ADB 截图超时，请检查连接"
+      "capture-timeout": "ADB 截图超时，请检查连接",
+      "remote-dialog": {
+        "title": "远程 ADB 配对 / 连接",
+        "description": "使用本地 ADB server，直接选择已有设备，或通过 Android 无线调试完成配对与连接。",
+        "cancel": "取消",
+        "tabs": {
+          "devices": "设备",
+          "connect": "连接",
+          "pair": "配对"
+        },
+        "devices": {
+          "description": "直接选择本机 ADB server 中已经就绪的设备。",
+          "refresh": "刷新",
+          "loading": "正在加载设备...",
+          "empty": "未发现 ADB 设备。请先连接 USB 设备，或使用下方的配对 / 连接功能。",
+          "select": "使用此设备",
+          "selected": "已选择",
+          "selected-badge": "当前设备"
+        },
+        "connect": {
+          "description": "如果这台电脑已经与设备完成过配对，请直接使用连接地址。",
+          "address": "设备地址",
+          "placeholder": "192.168.1.23:5555",
+          "submit": "连接"
+        },
+        "pair": {
+          "description": "填写 Android 无线调试中显示的配对地址和配对码。配对完成后，请切换到“连接”标签继续连接。",
+          "pair-address": "配对地址",
+          "pair-address-placeholder": "192.168.1.23:37123",
+          "pairing-code": "配对码",
+          "pairing-code-placeholder": "123456",
+          "submit": "配对"
+        }
+      }
     },
     "toasts": {
       "adb-failed": "ADB 处理发生异常：{{error}}",
       "webusb-not-supported": "该浏览器不支持 WebUSB。"
+    }
+  },
+  "document-scanner": {
+    "title": "文档扫描",
+    "actions": {
+      "send-to-ai": "发送到 AI（{{count}}）"
+    },
+    "overlay": {
+      "processing": "正在处理采集结果...",
+      "connecting": "正在连接设备相机...",
+      "idle": "启动实时预览后即可对齐文档。",
+      "error-title": "扫描错误"
+    },
+    "captured": {
+      "title": "已捕获文档",
+      "description": "预览采集结果会汇总在这里，便于检查和发送。",
+      "item-count": "{{count}} 项",
+      "item-count_plural": "{{count}} 项",
+      "preview-alt": "已捕获文档 {{index}}",
+      "status": {
+        "processing": "后处理中",
+        "ready": "点击调整",
+        "failed": "处理失败"
+      }
+    },
+    "connection": {
+      "recovering": "正在恢复预览流...",
+      "starting": "正在启动预览流...",
+      "recovered": "预览流已恢复。",
+      "active": "预览流运行中。",
+      "recovering-delay": "{{delayMs}}ms 后恢复预览流。",
+      "stopped-by-user": "预览已由用户停止。",
+      "stopped": "预览流已停止。",
+      "failed": "预览流启动失败。",
+      "idle": "扫描器空闲。",
+      "started": "预览流已启动。",
+      "start-failed": "预览流启动失败。"
+    },
+    "toasts": {
+      "scanner-error": "扫描错误：{{message}}",
+      "auto-capturing-preview": "正在从预览自动采集...",
+      "capturing-preview": "正在从预览采集...",
+      "preview-ready": "预览采集已完成。",
+      "preview-failed": "预览采集失败：{{message}}",
+      "post-process-failed": "文档后处理失败：{{message}}",
+      "post-processing-pending": "还有 {{count}} 个已捕获文档在后处理中。",
+      "post-processing-blocked": "有 {{count}} 个已捕获文档后处理失败，请调整或删除后再发送。",
+      "no-device": "没有可用的 ADB 设备，请先连接设备。",
+      "server-jar-missing": "无法定位 camera-server.jar 资源。",
+      "start-failed": "启动扫描器失败：{{message}}",
+      "no-documents": "还没有采集到任何文档。"
+    },
+    "editor": {
+      "title": "调整文档四角",
+      "description": "拖动四个角点对齐文档边缘，然后重新裁切。",
+      "image-alt": "已捕获文档原图",
+      "hint": "提示：把手柄尽量贴合纸张真实四角，再点击应用。",
+      "actions": {
+        "reset": "重置",
+        "cancel": "取消",
+        "apply": "应用裁切",
+        "applying": "应用中..."
+      }
+    },
+    "controls": {
+      "title": "实时预览控制",
+      "description": "启动相机预览、从实时流采集，并调整自动采集策略。",
+      "badges": {
+        "live": "实时中",
+        "stopped": "已停止",
+        "stable": "稳定",
+        "unstable": "不稳定"
+      },
+      "metrics": {
+        "preview-resolution": "预览分辨率",
+        "reconnect-state": "重连状态"
+      },
+      "actions": {
+        "connecting": "连接中...",
+        "start": "启动预览",
+        "stop": "停止预览",
+        "processing": "处理中...",
+        "capture": "采集预览",
+        "use-landscape": "切换为横向预览框",
+        "use-portrait": "切换为纵向预览框"
+      },
+      "auto-capture": {
+        "label": "自动采集",
+        "description": "当文档轮廓稳定后自动完成采集。"
+      },
+      "states": {
+        "reconnect": {
+          "connected": "已连接",
+          "connecting": "连接中",
+          "error": "错误",
+          "idle": "空闲",
+          "reconnecting": "重连中",
+          "stopped": "已停止"
+        }
+      }
+    },
+    "preview-hud": {
+      "state": {
+        "pass": "达标",
+        "pending": "等待中",
+        "fail": "未达标"
+      },
+      "target": "{{fps}}+ FPS",
+      "metrics": {
+        "now": "瞬时",
+        "window": "窗口",
+        "effective": "推流",
+        "frame": "帧",
+        "resolution": "分辨率"
+      }
+    },
+    "debug": {
+      "preview": {
+        "title": "实时预览",
+        "description": "低延迟预览传输指标与实时流状态。"
+      },
+      "cv": {
+        "title": "CV 调试",
+        "description": "轮廓检测、稳定性、角点信息与处理分辨率。",
+        "badges": {
+          "ready": "OpenCV 已就绪",
+          "unavailable": "OpenCV 不可用",
+          "document-detected": "已检测到文档",
+          "no-document": "未检测到文档",
+          "stable": "稳定",
+          "unstable": "不稳定",
+          "processing": "处理中",
+          "idle": "空闲"
+        },
+        "metrics": {
+          "corner-count": "角点数量",
+          "processing-resolution": "处理分辨率",
+          "auto-capture": "自动采集",
+          "enabled": "已启用",
+          "disabled": "已禁用",
+          "last-update": "最近 CV 更新时间",
+          "corner-label": "角点 {{corner}}"
+        },
+        "empty": "当前还没有可用的轮廓点。请将文档保持在预览区域内，并确认 OpenCV 已加载完成。"
+      },
+      "capture": {
+        "title": "后处理计时",
+        "description": "最近一次文档后处理的分段耗时与输入输出分辨率。",
+        "badges": {
+          "idle": "空闲",
+          "processing": "处理中",
+          "success": "已完成",
+          "error": "失败",
+          "redetect-on": "源图重检开",
+          "redetect-off": "源图重检关",
+          "crop-on": "裁切开",
+          "crop-off": "裁切关",
+          "enhance-on": "增强开",
+          "enhance-off": "增强关"
+        },
+        "metrics": {
+          "total": "总耗时",
+          "total-hint": "单次后处理从开始到产出文件",
+          "decode": "源图解码",
+          "redetect": "源图重检",
+          "crop": "透视裁切",
+          "enhance": "文档增强",
+          "encode": "结果编码",
+          "input-resolution": "输入分辨率",
+          "output-resolution": "输出分辨率",
+          "last-update": "最近后处理更新时间",
+          "error": "最近后处理错误"
+        }
+      },
+      "badges": {
+        "state": {
+          "pass": "达标",
+          "pending": "等待中",
+          "fail": "未达标"
+        },
+        "current": "瞬时 {{state}} (>= {{fps}} FPS)",
+        "window": "窗口 {{state}}",
+        "effective": "推流 {{state}}"
+      },
+      "metrics": {
+        "current-fps": {
+          "label": "瞬时 FPS",
+          "hint": "最近一次帧间隔"
+        },
+        "window-fps": {
+          "label": "窗口 FPS",
+          "hint": "连续的短时滚动窗口"
+        },
+        "effective-fps": {
+          "label": "推流 FPS",
+          "hint": "从首帧起的平均值，不含重连停顿"
+        },
+        "frame-index": "帧索引",
+        "preview-resolution": "预览分辨率",
+        "payload-size": "负载大小",
+        "poll-count": "轮询次数",
+        "poll-wait": "调用等待",
+        "js-decode": "JS 解码",
+        "canvas-draw": "Canvas 绘制",
+        "last-update": "最近更新时间",
+        "reconnect-status": "重连状态",
+        "recent-error": "最近错误"
+      },
+      "hints": {
+        "reconnect-attempt": "第 {{attempt}} 次 / 共 {{max}} 次",
+        "no-reconnect-attempt": "当前没有重连尝试。",
+        "last-disconnect": "最近断开于 {{time}}",
+        "no-disconnect": "当前没有断连记录。"
+      },
+      "states": {
+        "status": {
+          "idle": "空闲",
+          "connecting": "连接中",
+          "streaming": "推流中",
+          "error": "错误"
+        },
+        "reconnect": {
+          "connected": "已连接",
+          "connecting": "连接中",
+          "reconnecting": "重连中",
+          "stopped": "已停止",
+          "error": "错误",
+          "idle": "空闲",
+          "starting": "启动中",
+          "stopping": "停止中"
+        },
+        "pipeline": {
+          "idle": "idle",
+          "preview": "preview",
+          "single-hq": "single-hq"
+        }
+      }
     }
   },
   "uploads-info": {
@@ -691,7 +964,8 @@
   "sources": {
     "upload": "本地上传",
     "camera": "拍摄",
-    "adb": "ADB"
+    "adb": "ADB",
+    "scanner": "扫描器"
   },
   "ai-client": {
     "openai": {

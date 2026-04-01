@@ -44,6 +44,26 @@ devenv.local.yaml
 # local qodana checks
 qodana.yaml
 
+# temp tooling
+.tmp/
+
 # serwist
 public/sw.js
 public/sw.js.map
+
+# build output
+out
+src-tauri/target
+server/.gradle/
+server/build/
+server/build_custom
+outputs
+docs
+
+#scripts
+scripts
+
+# local AI Agent Settings
+.claude
+agents.md
+claude.md

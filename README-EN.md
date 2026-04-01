@@ -20,7 +20,7 @@ If this tool saved your time, please give us a star or share this tool to your f
 - Customizable answer styles, not limited to standard answers
 - Can access from your computer, tablet or mobile phone
 - Ergonomics, keyboard workflow support
-- ADB Screenshot support (**EXPERIMENT**)
+- ADB Screenshot support (WebUSB on Web, native Remote ADB pair/connect on Tauri desktop)
 
 ## Try it
 
@@ -53,10 +53,13 @@ You need to request a Gemini API key for AI usage.
 
 ## I don't have a camera on my computer, please help
 
-The [SkidCamera](https://github.com/996-ai/SkidCamera)
-is what you are looking for.
+You have two local-only options:
 
-Please follow the guide in the SkidCamera README.
+- Web: use ADB screenshot via WebUSB in a supported browser.
+- Tauri desktop: use Android Wireless debugging with native Remote ADB pair/connect.
+
+You can also try [SkidCamera](https://github.com/996-ai/SkidCamera)
+and follow the guide in the SkidCamera README.
 
 ## Why Too Much Homework is bad
 
@@ -108,6 +111,29 @@ services:
     ports:
       - 3000:3000
 ```
+
+## Tauri Multi-Platform Releases
+
+The repository now includes a `Tauri Release` GitHub Actions workflow that can be triggered manually to build Tauri
+release artifacts for:
+
+- Android: APK / AAB
+- Linux: AppImage / `.deb` / `.rpm`
+- Windows: NSIS / MSI
+- macOS: separate Intel and Apple Silicon builds
+
+The workflow automatically:
+
+- calculates the next semantic version from existing Git tags;
+- generates a project-specific GitHub Release markdown page;
+- collects the platform artifacts and publishes them in a single GitHub Release.
+
+If you want signed Android release builds in CI, configure these repository secrets:
+
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
 
 ## License
 

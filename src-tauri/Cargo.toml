@@ -1,0 +1,48 @@
+[package]
+name = "skid-homework"
+version = "0.1.0"
+description = "Skid Homework - AI-powered learning assistant desktop app"
+authors = ["you"]
+license = ""
+repository = ""
+edition = "2021"
+rust-version = "1.77.2"
+default-run = "skid-homework"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[profile.dev]
+# Windows + MSVC + the current Rust/LLVM toolchain can emit malformed
+# incremental objects for this crate under the optimized dev profile,
+# which later fail at link time with unresolved anon/.llvm symbols.
+incremental = false
+opt-level = 3
+debug = 0
+
+[build-dependencies]
+tauri-build = { version = "2.5.6", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.10.3", features = [] }
+tauri-plugin-log = "2"
+tauri-plugin-opener = "2"
+# H.264 stream decoding and transport
+openh264 = "0.9"
+base64 = "0.22"
+tokio = { version = "1", features = ["net", "io-util", "sync", "macros", "rt", "time"] }
+png = "0.17.16"
+image = { version = "0.25.5", default-features = false, features = ["jpeg", "png"] }
+imageproc = "0.25.0"
+
+# Optimize all dependencies even in dev builds.
+# Without this, CPU-heavy crates like openh264 run ~50x slower
+# (e.g. H.264 decode: 600 ms debug vs ~10 ms optimized).
+[profile.dev.package."*"]
+opt-level = 2

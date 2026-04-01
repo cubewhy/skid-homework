@@ -255,17 +255,292 @@
     "pdf-disabled": "PDF uploads are available only when a Gemini or OpenAI (Response API enabled) source is enabled.",
     "adb": {
       "connect": "ADB Connect",
+      "document-scanner": "Document Scanner",
       "reconnect": "Reconnect ADB",
       "screenshot": "ADB Screenshot",
       "connecting": "Connecting...",
+      "connected": "Connected to {{serial}}.",
+      "paired": "Pairing succeeded. Now connect using the device's connect address.",
       "screenshot-busy": "Capturing...",
-      "screenshot-hint": "Capture a screenshot from a connected Android device via ADB (WebUSB)",
+      "screenshot-hint": "Capture a screenshot from a connected Android device via ADB",
       "menu-aria-label": "ADB Menu",
-      "capture-timeout": "ADB screenshot timed out. Please check the connection and try again."
+      "capture-timeout": "ADB screenshot timed out. Please check the connection and try again.",
+      "remote-dialog": {
+        "title": "Remote ADB Pair / Connect",
+        "description": "Use the local ADB server, pick an existing device, or use Android Wireless debugging to pair and connect.",
+        "cancel": "Cancel",
+        "tabs": {
+          "devices": "Devices",
+          "connect": "Connect",
+          "pair": "Pair"
+        },
+        "devices": {
+          "description": "Select a ready device that already exists in the local ADB server list.",
+          "refresh": "Refresh",
+          "loading": "Loading devices...",
+          "empty": "No ADB devices were found. Connect a USB device or use the Pair / Connect tabs first.",
+          "select": "Use Device",
+          "selected": "Selected",
+          "selected-badge": "Selected"
+        },
+        "connect": {
+          "description": "Use this if the device has already been paired with this computer.",
+          "address": "Device address",
+          "placeholder": "192.168.1.23:5555",
+          "submit": "Connect"
+        },
+        "pair": {
+          "description": "Enter the pairing address and code from Android Wireless debugging. After pairing, switch to the Connect tab.",
+          "pair-address": "Pairing address",
+          "pair-address-placeholder": "192.168.1.23:37123",
+          "pairing-code": "Pairing code",
+          "pairing-code-placeholder": "123456",
+          "submit": "Pair"
+        }
+      }
     },
     "toasts": {
       "adb-failed": "Something went wrong with ADB: {{error}}",
       "webusb-not-supported": "WebUSB is not supported in this browser."
+    }
+  },
+  "document-scanner": {
+    "title": "Document Scanner",
+    "actions": {
+      "send-to-ai": "Send to AI ({{count}})"
+    },
+    "overlay": {
+      "processing": "Processing capture...",
+      "connecting": "Connecting to device camera...",
+      "idle": "Start the real-time preview to align a document.",
+      "error-title": "Scanner Error"
+    },
+    "captured": {
+      "title": "Captured Documents",
+      "description": "Preview captures are collected here for review and export.",
+      "item-count": "{{count}} item",
+      "item-count_plural": "{{count}} items",
+      "preview-alt": "Captured document {{index}}",
+      "status": {
+        "processing": "Post-processing",
+        "ready": "Tap to adjust",
+        "failed": "Needs retry"
+      }
+    },
+    "connection": {
+      "recovering": "Recovering preview stream...",
+      "starting": "Starting preview stream...",
+      "recovered": "Preview stream recovered.",
+      "active": "Preview stream active.",
+      "recovering-delay": "Recovering preview stream in {{delayMs}}ms.",
+      "stopped-by-user": "Preview stopped by user.",
+      "stopped": "Preview stream stopped.",
+      "failed": "Preview stream failed.",
+      "idle": "Scanner idle.",
+      "started": "Preview stream started.",
+      "start-failed": "Failed to start preview stream."
+    },
+    "toasts": {
+      "scanner-error": "Scanner error: {{message}}",
+      "auto-capturing-preview": "Auto-capturing from preview...",
+      "capturing-preview": "Capturing from preview...",
+      "preview-ready": "Preview capture ready.",
+      "preview-failed": "Preview capture failed: {{message}}",
+      "post-process-failed": "Document post-processing failed: {{message}}",
+      "post-processing-pending": "{{count}} captured document is still post-processing.",
+      "post-processing-pending_plural": "{{count}} captured documents are still post-processing.",
+      "post-processing-blocked": "{{count}} captured document failed post-processing. Adjust or remove it before sending.",
+      "post-processing-blocked_plural": "{{count}} captured documents failed post-processing. Adjust or remove them before sending.",
+      "no-device": "No ADB device connected. Please connect a device first.",
+      "server-jar-missing": "Failed to locate camera-server.jar resource.",
+      "start-failed": "Failed to start scanner: {{message}}",
+      "no-documents": "No documents captured yet."
+    },
+    "editor": {
+      "title": "Adjust Document Corners",
+      "description": "Drag the four corners to match the document, then re-run the crop.",
+      "image-alt": "Captured document source",
+      "hint": "Tip: align the handles with the real page corners before applying.",
+      "actions": {
+        "reset": "Reset",
+        "cancel": "Cancel",
+        "apply": "Apply Crop",
+        "applying": "Applying..."
+      }
+    },
+    "controls": {
+      "title": "Live Preview Controls",
+      "description": "Start the camera preview, capture from the live stream, and tune auto-capture.",
+      "badges": {
+        "live": "Live",
+        "stopped": "Stopped",
+        "stable": "Stable",
+        "unstable": "Unstable"
+      },
+      "metrics": {
+        "preview-resolution": "Preview Resolution",
+        "reconnect-state": "Reconnect State"
+      },
+      "actions": {
+        "connecting": "Connecting...",
+        "start": "Start Preview",
+        "stop": "Stop Preview",
+        "processing": "Processing...",
+        "capture": "Capture Preview",
+        "use-landscape": "Use Landscape Frame",
+        "use-portrait": "Use Portrait Frame"
+      },
+      "auto-capture": {
+        "label": "Auto-Capture",
+        "description": "Automatically capture once the document contour becomes stable."
+      },
+      "states": {
+        "reconnect": {
+          "connected": "Connected",
+          "connecting": "Connecting",
+          "error": "Error",
+          "idle": "Idle",
+          "reconnecting": "Reconnecting",
+          "stopped": "Stopped"
+        }
+      }
+    },
+    "preview-hud": {
+      "state": {
+        "pass": "PASS",
+        "pending": "PENDING",
+        "fail": "FAIL"
+      },
+      "target": "{{fps}}+ FPS",
+      "metrics": {
+        "now": "inst",
+        "window": "win",
+        "effective": "stream",
+        "frame": "frame",
+        "resolution": "res"
+      }
+    },
+    "debug": {
+      "preview": {
+        "title": "Real-Time Preview",
+        "description": "Low-latency preview transport metrics and live stream status."
+      },
+      "cv": {
+        "title": "CV Debug",
+        "description": "Contour detection, stability, corner points, and processing resolution.",
+        "badges": {
+          "ready": "OpenCV ready",
+          "unavailable": "OpenCV unavailable",
+          "document-detected": "Document detected",
+          "no-document": "No document",
+          "stable": "Stable",
+          "unstable": "Unstable",
+          "processing": "Processing",
+          "idle": "Idle"
+        },
+        "metrics": {
+          "corner-count": "Corner Count",
+          "processing-resolution": "Processing Resolution",
+          "auto-capture": "Auto-Capture",
+          "enabled": "Enabled",
+          "disabled": "Disabled",
+          "last-update": "Last CV Update",
+          "corner-label": "Corner {{corner}}"
+        },
+        "empty": "No active contour points are available yet. Keep the document inside the preview frame and ensure OpenCV has loaded."
+      },
+      "capture": {
+        "title": "Post-Process Timing",
+        "description": "Segment timings and input/output resolutions for the latest captured-document post-process pass.",
+        "badges": {
+          "idle": "Idle",
+          "processing": "Processing",
+          "success": "Done",
+          "error": "Failed",
+          "redetect-on": "Redetect on",
+          "redetect-off": "Redetect off",
+          "crop-on": "Crop on",
+          "crop-off": "Crop off",
+          "enhance-on": "Enhance on",
+          "enhance-off": "Enhance off"
+        },
+        "metrics": {
+          "total": "Total",
+          "total-hint": "Single post-process pass from start to output file",
+          "decode": "Source Decode",
+          "redetect": "Source Redetect",
+          "crop": "Perspective Crop",
+          "enhance": "Document Enhance",
+          "encode": "Output Encode",
+          "input-resolution": "Input Resolution",
+          "output-resolution": "Output Resolution",
+          "last-update": "Last Post-Process Update",
+          "error": "Last Post-Process Error"
+        }
+      },
+      "badges": {
+        "state": {
+          "pass": "PASS",
+          "pending": "PENDING",
+          "fail": "FAIL"
+        },
+        "current": "instant {{state}} (>= {{fps}} FPS)",
+        "window": "window {{state}}",
+        "effective": "stream {{state}}"
+      },
+      "metrics": {
+        "current-fps": {
+          "label": "Instant FPS",
+          "hint": "Latest frame interval"
+        },
+        "window-fps": {
+          "label": "Window FPS",
+          "hint": "Contiguous short rolling window"
+        },
+        "effective-fps": {
+          "label": "Stream FPS",
+          "hint": "Average since first frame, excluding reconnect downtime"
+        },
+        "frame-index": "Frame Index",
+        "preview-resolution": "Preview Resolution",
+        "payload-size": "Payload Size",
+        "poll-count": "Poll Count",
+        "poll-wait": "Invoke Wait",
+        "js-decode": "JS Decode",
+        "canvas-draw": "Canvas Draw",
+        "last-update": "Last Update",
+        "reconnect-status": "Reconnect Status",
+        "recent-error": "Recent Error"
+      },
+      "hints": {
+        "reconnect-attempt": "Attempt {{attempt}} / {{max}}",
+        "no-reconnect-attempt": "No reconnect attempt reported.",
+        "last-disconnect": "Last disconnect {{time}}",
+        "no-disconnect": "No disconnect recorded."
+      },
+      "states": {
+        "status": {
+          "idle": "Idle",
+          "connecting": "Connecting",
+          "streaming": "Streaming",
+          "error": "Error"
+        },
+        "reconnect": {
+          "connected": "Connected",
+          "connecting": "Connecting",
+          "reconnecting": "Reconnecting",
+          "stopped": "Stopped",
+          "error": "Error",
+          "idle": "Idle",
+          "starting": "Starting",
+          "stopping": "Stopping"
+        },
+        "pipeline": {
+          "idle": "idle",
+          "preview": "preview",
+          "single-hq": "single-hq"
+        }
+      }
     }
   },
   "uploads-info": {
@@ -687,7 +962,8 @@
   "sources": {
     "upload": "Upload",
     "camera": "Camera",
-    "adb": "ADB"
+    "adb": "ADB",
+    "scanner": "Scanner"
   },
   "ai-client": {
     "openai": {

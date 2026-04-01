@@ -1,0 +1,58 @@
+/* Tauri custom title bar styles */
+.tauri-title-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 32px;
+    padding-left: 12px;
+    background: var(--background);
+    border-bottom: 1px solid var(--border);
+    user-select: none;
+    -webkit-user-select: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 9999;
+}
+
+/* Offset the app scroll container below the fixed title bar in Tauri */
+body:has(.tauri-title-bar) .app-scroll-container {
+    height: calc(100% - 32px);
+    margin-top: 32px;
+}
+
+.tauri-title-bar__label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--foreground);
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+.tauri-title-bar__controls {
+    display: flex;
+    height: 100%;
+}
+
+.tauri-title-bar__btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 46px;
+    height: 100%;
+    border: none;
+    background: transparent;
+    color: var(--foreground);
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.tauri-title-bar__btn:hover {
+    background: var(--accent);
+}
+
+.tauri-title-bar__btn--close:hover {
+    background: oklch(0.577 0.245 27.325);
+    color: white;
+}

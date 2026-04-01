@@ -1,0 +1,464 @@
+name: Tauri Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: Select how to bump the semantic version
+        required: true
+        default: patch
+        type: choice
+        options:
+          - major
+          - minor
+          - patch
+      prerelease:
+        description: Mark the GitHub Release as a prerelease
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  WORKFLOW_GIT_TOKEN: ${{ secrets.WORKFLOW_GIT_TOKEN }}
+  DEFAULT_GITHUB_TOKEN: ${{ github.token }}
+  PNPM_VERSION: 10.27.0
+  NODE_VERSION: 24
+  ANDROID_API_LEVEL: "36"
+  ANDROID_BUILD_TOOLS: "36.0.0"
+  ANDROID_NDK_VERSION: "29.0.14206865"
+
+concurrency:
+  group: tauri-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+
+    outputs:
+      previous_tag: ${{ steps.version.outputs.previous_tag }}
+      new_tag: ${{ steps.version.outputs.new_tag }}
+      version_name: ${{ steps.version.outputs.version_name }}
+      release_title: ${{ steps.version.outputs.release_title }}
+      prerelease: ${{ steps.release_config.outputs.prerelease }}
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve release configuration
+        id: release_config
+        shell: bash
+        env:
+          INPUT_RELEASE_TYPE: ${{ inputs.release_type }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+
+          case "${INPUT_RELEASE_TYPE}" in
+            major|minor|patch)
+              ;;
+            *)
+              echo "Unsupported release type: ${INPUT_RELEASE_TYPE}" >&2
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "release_type=${INPUT_RELEASE_TYPE}"
+            echo "prerelease=${INPUT_PRERELEASE:-false}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Calculate next version
+        id: version
+        shell: bash
+        env:
+          RELEASE_TYPE: ${{ steps.release_config.outputs.release_type }}
+        run: |
+          set -euo pipefail
+
+          git fetch --tags --force
+
+          latest_tag="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | head -n 1)"
+          if [ -z "$latest_tag" ]; then
+            version_name="$(python3 -c 'import json, pathlib; print(json.loads(pathlib.Path("src-tauri/tauri.conf.json").read_text(encoding="utf-8"))["version"])')"
+            new_tag="v${version_name}"
+          else
+            base_version="${latest_tag#v}"
+            IFS='.' read -r major minor patch <<< "$base_version"
+            case "$RELEASE_TYPE" in
+              major)
+                major=$((major + 1))
+                minor=0
+                patch=0
+                ;;
+              minor)
+                minor=$((minor + 1))
+                patch=0
+                ;;
+              patch)
+                patch=$((patch + 1))
+                ;;
+              *)
+                echo "Unsupported release type: $RELEASE_TYPE" >&2
+                exit 1
+                ;;
+            esac
+
+            version_name="${major}.${minor}.${patch}"
+            new_tag="v${version_name}"
+          fi
+
+          if git rev-parse "refs/tags/$new_tag" >/dev/null 2>&1 || git ls-remote --exit-code --tags origin "refs/tags/$new_tag" >/dev/null 2>&1; then
+            echo "Tag $new_tag already exists." >&2
+            exit 1
+          fi
+
+          {
+            echo "previous_tag=$latest_tag"
+            echo "new_tag=$new_tag"
+            echo "version_name=$version_name"
+            echo "release_title=Skid Homework ${new_tag}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        id: push_tag
+        shell: bash
+        env:
+          NEW_TAG: ${{ steps.version.outputs.new_tag }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          push_with_token() {
+            local token="$1"
+            local token_source="$2"
+            local push_log="$RUNNER_TEMP/git-push-${NEW_TAG}-${token_source}.log"
+
+            echo "::add-mask::$token"
+            if git push "https://x-access-token:${token}@github.com/${GITHUB_REPOSITORY}.git" "$NEW_TAG" 2>&1 | tee "$push_log"; then
+              echo "Pushed tag with ${token_source}"
+              return 0
+            fi
+
+            if grep -Fq "403" "$push_log" || grep -Fq "Permission to" "$push_log"; then
+              echo "Tag push with ${token_source} was rejected by GitHub."
+            fi
+
+            return 1
+          }
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "$NEW_TAG" "$GITHUB_SHA"
+
+          if push_with_token "$GITHUB_TOKEN" "GITHUB_TOKEN"; then
+            exit 0
+          fi
+
+          if [ -n "${WORKFLOW_GIT_TOKEN:-}" ] && push_with_token "$WORKFLOW_GIT_TOKEN" "WORKFLOW_GIT_TOKEN"; then
+            exit 0
+          fi
+
+          git tag -d "$NEW_TAG" >/dev/null 2>&1 || true
+          echo "::error title=Tag push failed::Failed to push tag $NEW_TAG with both GITHUB_TOKEN and WORKFLOW_GIT_TOKEN. Ensure the workflow has contents:write and any configured PAT can write to ${GITHUB_REPOSITORY}."
+          exit 1
+
+  build-desktop:
+    needs: prepare-release
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform_id: windows
+            runner: windows-latest
+            rust_targets: x86_64-pc-windows-msvc
+            build_args: ""
+          - platform_id: linux
+            runner: ubuntu-22.04
+            rust_targets: x86_64-unknown-linux-gnu
+            build_args: ""
+          - platform_id: macos-x64
+            runner: macos-15-intel
+            rust_targets: x86_64-apple-darwin
+            build_args: "--target x86_64-apple-darwin"
+          - platform_id: macos-aarch64
+            runner: macos-15
+            rust_targets: aarch64-apple-darwin
+            build_args: "--target aarch64-apple-darwin"
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - name: Set up Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply release version
+        run: python .github/scripts/set_release_version.py ${{ needs.prepare-release.outputs.version_name }}
+
+      - name: Build desktop bundles
+        run: pnpm tauri build --ci --no-sign ${{ matrix.build_args }}
+
+      - name: Collect desktop artifacts
+        run: python .github/scripts/collect_tauri_artifacts.py --platform-id ${{ matrix.platform_id }} --output-dir release-assets
+
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ matrix.platform_id }}
+          path: release-assets
+          if-no-files-found: error
+
+  build-android:
+    needs: prepare-release
+    runs-on: ubuntu-latest
+
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Set up Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager "platforms;android-${ANDROID_API_LEVEL}" "build-tools;${ANDROID_BUILD_TOOLS}" "ndk;${ANDROID_NDK_VERSION}"
+
+          selected_ndk="$(find "${ANDROID_HOME}/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          if [ -z "${selected_ndk:-}" ] || [ ! -d "$selected_ndk" ]; then
+            echo "Unable to resolve an installed Android NDK under ${ANDROID_HOME}/ndk" >&2
+            exit 1
+          fi
+
+          echo "Using Android NDK: ${selected_ndk}"
+          echo "NDK_HOME=${selected_ndk}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=${selected_ndk}" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply release version
+        run: python .github/scripts/set_release_version.py ${{ needs.prepare-release.outputs.version_name }}
+
+      - name: Initialize Android target
+        run: pnpm tauri android init --ci --skip-targets-install
+
+      - name: Prepare Android signing files
+        if: env.ANDROID_KEYSTORE_BASE64 != '' && env.ANDROID_KEY_ALIAS != '' && env.ANDROID_KEY_PASSWORD != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          android_root="src-tauri/gen/android"
+          keystore_path="${android_root}/release.keystore"
+          keystore_properties_path="${android_root}/keystore.properties"
+          store_password="${ANDROID_KEYSTORE_PASSWORD:-$ANDROID_KEY_PASSWORD}"
+
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+
+          cat > "$keystore_properties_path" <<EOF
+          keyAlias=${ANDROID_KEY_ALIAS}
+          keyPassword=${ANDROID_KEY_PASSWORD}
+          storeFile=release.keystore
+          storePassword=${store_password}
+          EOF
+
+          python .github/scripts/configure_android_signing.py
+
+      - name: Build Android bundles
+        run: pnpm tauri android build --apk --aab --ci
+
+      - name: Collect Android artifacts
+        run: python .github/scripts/collect_tauri_artifacts.py --platform-id android --output-dir release-assets
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-android
+          path: release-assets
+          if-no-files-found: error
+
+  publish-release:
+    needs:
+      - prepare-release
+      - build-desktop
+      - build-android
+    if: needs.prepare-release.result == 'success' && needs.build-desktop.result == 'success' && needs.build-android.result == 'success'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-assets-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Generate release notes
+        shell: bash
+        env:
+          PREVIOUS_TAG: ${{ needs.prepare-release.outputs.previous_tag }}
+          NEW_TAG: ${{ needs.prepare-release.outputs.new_tag }}
+          VERSION_NAME: ${{ needs.prepare-release.outputs.version_name }}
+          RELEASE_TYPE: ${{ inputs.release_type }}
+          RELEASE_PRERELEASE: ${{ needs.prepare-release.outputs.prerelease }}
+          TARGET_SHA: ${{ github.sha }}
+          PROJECT_NAME: Skid Homework
+          WEB_INSTANCE_URL: https://skid.996every.day
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          python3 .github/scripts/generate_release_notes.py
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW_TAG: ${{ needs.prepare-release.outputs.new_tag }}
+          RELEASE_TITLE: ${{ needs.prepare-release.outputs.release_title }}
+          RELEASE_PRERELEASE: ${{ needs.prepare-release.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          files=(release-assets/*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No release assets were downloaded." >&2
+            exit 1
+          fi
+
+          prerelease_args=()
+          if [ "$RELEASE_PRERELEASE" = "true" ]; then
+            prerelease_args+=(--prerelease)
+          fi
+
+          gh release create "$NEW_TAG" "${files[@]}" \
+            --title "$RELEASE_TITLE" \
+            --notes-file release-notes.md \
+            "${prerelease_args[@]}"
+
+  rollback-tag:
+    needs:
+      - prepare-release
+      - build-desktop
+      - build-android
+      - publish-release
+    if: always() && needs.prepare-release.result == 'success' && (needs.build-desktop.result == 'failure' || needs.build-android.result == 'failure' || needs.publish-release.result == 'failure')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare git auth
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          auth_token="${GITHUB_TOKEN}"
+
+          echo "::add-mask::$auth_token"
+          git remote set-url origin "https://x-access-token:${auth_token}@github.com/${GITHUB_REPOSITORY}.git"
+          echo "GH_TOKEN=$auth_token" >> "$GITHUB_ENV"
+
+      - name: Roll back failed release tag
+        shell: bash
+        env:
+          NEW_TAG: ${{ needs.prepare-release.outputs.new_tag }}
+        run: |
+          set +e
+
+          gh release delete "$NEW_TAG" --yes --cleanup-tag
+          if [ $? -ne 0 ]; then
+            git push --delete origin "$NEW_TAG" || true
+          fi
+
+          git tag -d "$NEW_TAG" >/dev/null 2>&1 || true
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$NEW_TAG" >/dev/null 2>&1; then
+            echo "Failed to roll back remote tag $NEW_TAG" >&2
+            exit 1
+          fi
