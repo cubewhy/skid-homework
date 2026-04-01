@@ -3,16 +3,20 @@ package com.skidhomework.server;
 import android.annotation.SuppressLint;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Rect;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
+import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.CaptureFailure;
+import android.hardware.camera2.TotalCaptureResult;
 import android.graphics.ImageFormat;
 import android.media.Image;
 import android.media.ImageReader;
+import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.SystemClock;
@@ -74,6 +78,8 @@ public final class CameraCapture implements CameraCaptureBackend {
     private ImageReader stillImageReader;
     private Size stillCaptureSize;
     private int stillJpegOrientation;
+    private Range<Integer> previewFpsRange;
+    private Float previewFocusDistance;
 
     public CameraCapture(
             String cameraId,
@@ -185,20 +191,37 @@ public final class CameraCapture implements CameraCaptureBackend {
             );
 
             CaptureRequest.Builder requestBuilder =
-                    activeCamera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
+                    activeCamera.createCaptureRequest(CameraDevice.TEMPLATE_VIDEO_SNAPSHOT);
             requestBuilder.addTarget(activeReader.getSurface());
+            requestBuilder.addTarget(encoderSurface);
             requestBuilder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO);
             requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
             requestBuilder.set(
                     CaptureRequest.CONTROL_AF_MODE,
-                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
             );
+            if (previewFpsRange != null) {
+                requestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, previewFpsRange);
+            }
+            Float lockedPreviewFocusDistance = getClampedPreviewFocusDistance();
+            if (lockedPreviewFocusDistance != null) {
+                requestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF);
+                requestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, lockedPreviewFocusDistance);
+            }
             requestBuilder.set(CaptureRequest.JPEG_QUALITY, JPEG_QUALITY);
             requestBuilder.set(CaptureRequest.JPEG_ORIENTATION, stillJpegOrientation);
+            final CaptureRequest stillRequest = requestBuilder.build();
+
+            System.out.println(
+                    "[StillCapture] Submitting preview-aligned still request (surfaces=still+preview): "
+                            + describeCaptureRequest(stillRequest)
+                            + " previewFocusLock="
+                            + (lockedPreviewFocusDistance == null ? "none" : lockedPreviewFocusDistance)
+            );
 
             try {
                 activeSession.capture(
-                        requestBuilder.build(),
+                        stillRequest,
                         new CameraCaptureSession.CaptureCallback() {
                             @Override
                             public void onCaptureFailed(
@@ -211,6 +234,18 @@ public final class CameraCapture implements CameraCaptureBackend {
                                         "Still capture request failed: reason=" + failure.getReason()
                                 );
                                 imageLatch.countDown();
+                            }
+
+                            @Override
+                            public void onCaptureCompleted(
+                                    CameraCaptureSession session,
+                                    CaptureRequest request,
+                                    TotalCaptureResult result
+                            ) {
+                                System.out.println(
+                                        "[StillCapture] Capture result: "
+                                                + describeCaptureResult(result)
+                                );
                             }
                         },
                         handler
@@ -447,6 +482,7 @@ public final class CameraCapture implements CameraCaptureBackend {
                 CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
 
         Range<Integer> fpsRange = selectFpsRange(cameraCharacteristics, targetFps);
+        previewFpsRange = fpsRange;
         if (fpsRange != null) {
             requestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange);
             System.out.println(
@@ -460,13 +496,20 @@ public final class CameraCapture implements CameraCaptureBackend {
             System.out.println("[Camera] No exact AE FPS range found for target " + targetFps + " fps.");
         }
 
+        final CaptureRequest repeatingRequest = requestBuilder.build();
+        System.out.println(
+                "[Camera] Preview repeating request (surfaces=preview): "
+                        + describeCaptureRequest(repeatingRequest)
+        );
+
         final long repeatingRequestStartedAtMs = SystemClock.elapsedRealtime();
         final CountDownLatch firstCaptureLatch = new CountDownLatch(1);
         final AtomicBoolean firstCaptureReported = new AtomicBoolean(false);
+        final AtomicBoolean firstCaptureResultReported = new AtomicBoolean(false);
 
         try {
             captureSession.setRepeatingRequest(
-                    requestBuilder.build(),
+                    repeatingRequest,
                     new CameraCaptureSession.CaptureCallback() {
                         @Override
                         public void onCaptureStarted(
@@ -484,6 +527,21 @@ public final class CameraCapture implements CameraCaptureBackend {
                                                 + "ms after repeating request."
                                 );
                                 firstCaptureLatch.countDown();
+                            }
+                        }
+
+                        @Override
+                        public void onCaptureCompleted(
+                                CameraCaptureSession session,
+                                CaptureRequest request,
+                                TotalCaptureResult result
+                        ) {
+                            updatePreviewFocusDistance(result);
+                            if (firstCaptureResultReported.compareAndSet(false, true)) {
+                                System.out.println(
+                                        "[Camera] Preview first capture result: "
+                                                + describeCaptureResult(result)
+                                );
                             }
                         }
                     },
@@ -678,6 +736,8 @@ public final class CameraCapture implements CameraCaptureBackend {
         synchronized (cameraLock) {
             closeCaptureSessionLocked();
             closeStillImageReaderLocked();
+            previewFpsRange = null;
+            previewFocusDistance = null;
             if (callbackCamera != null) {
                 closeCameraDeviceLocked(callbackCamera);
             } else if (cameraDevice != null) {
@@ -787,6 +847,107 @@ public final class CameraCapture implements CameraCaptureBackend {
                 image.close();
             }
         }
+    }
+
+    private void updatePreviewFocusDistance(TotalCaptureResult result) {
+        Float focusDistance = result.get(CaptureResult.LENS_FOCUS_DISTANCE);
+        synchronized (cameraLock) {
+            previewFocusDistance = focusDistance;
+        }
+    }
+
+    private Float getClampedPreviewFocusDistance() {
+        synchronized (cameraLock) {
+            if (cameraCharacteristics == null || previewFocusDistance == null) {
+                return null;
+            }
+
+            Float minimumFocusDistance = cameraCharacteristics.get(
+                    CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE
+            );
+            if (minimumFocusDistance == null || !Float.isFinite(previewFocusDistance)) {
+                return null;
+            }
+
+            return Math.max(0f, Math.min(previewFocusDistance, minimumFocusDistance));
+        }
+    }
+
+    private static String describeCaptureRequest(CaptureRequest request) {
+        return "intent="
+                + request.get(CaptureRequest.CONTROL_CAPTURE_INTENT)
+                + " aeMode="
+                + request.get(CaptureRequest.CONTROL_AE_MODE)
+                + " afMode="
+                + request.get(CaptureRequest.CONTROL_AF_MODE)
+                + " fps="
+                + describeRange(request.get(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE))
+                + " crop="
+                + describeRect(request.get(CaptureRequest.SCALER_CROP_REGION))
+                + " zoom="
+                + describeRequestZoomRatio(request)
+                + " videoStab="
+                + request.get(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE)
+                + " opticalStab="
+                + request.get(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE)
+                + " focusDistance="
+                + request.get(CaptureRequest.LENS_FOCUS_DISTANCE)
+                + " jpegOrientation="
+                + request.get(CaptureRequest.JPEG_ORIENTATION);
+    }
+
+    private static String describeCaptureResult(TotalCaptureResult result) {
+        return "intent="
+                + result.get(CaptureResult.CONTROL_CAPTURE_INTENT)
+                + " aeMode="
+                + result.get(CaptureResult.CONTROL_AE_MODE)
+                + " afMode="
+                + result.get(CaptureResult.CONTROL_AF_MODE)
+                + " fps="
+                + describeRange(result.get(CaptureResult.CONTROL_AE_TARGET_FPS_RANGE))
+                + " crop="
+                + describeRect(result.get(CaptureResult.SCALER_CROP_REGION))
+                + " zoom="
+                + describeResultZoomRatio(result)
+                + " videoStab="
+                + result.get(CaptureResult.CONTROL_VIDEO_STABILIZATION_MODE)
+                + " opticalStab="
+                + result.get(CaptureResult.LENS_OPTICAL_STABILIZATION_MODE)
+                + " focalLength="
+                + result.get(CaptureResult.LENS_FOCAL_LENGTH)
+                + " focusDistance="
+                + result.get(CaptureResult.LENS_FOCUS_DISTANCE)
+                + " jpegOrientation="
+                + result.get(CaptureResult.JPEG_ORIENTATION);
+    }
+
+    private static String describeRange(Range<Integer> range) {
+        return range == null ? "default" : range.toString();
+    }
+
+    private static String describeRequestZoomRatio(CaptureRequest request) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return "n/a";
+        }
+
+        Float zoomRatio = request.get(CaptureRequest.CONTROL_ZOOM_RATIO);
+        return zoomRatio == null ? "default" : zoomRatio.toString();
+    }
+
+    private static String describeResultZoomRatio(TotalCaptureResult result) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return "n/a";
+        }
+
+        Float zoomRatio = result.get(CaptureResult.CONTROL_ZOOM_RATIO);
+        return zoomRatio == null ? "default" : zoomRatio.toString();
+    }
+
+    private static String describeRect(Rect rect) {
+        if (rect == null) {
+            return "default";
+        }
+        return rect.left + "," + rect.top + "-" + rect.right + "," + rect.bottom;
     }
 
     private static byte[] normalizeStillJpegForBrowserCompatibility(byte[] imageBytes) {
