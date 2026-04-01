@@ -1,49 +1,32 @@
 import {useEffect, useState} from "react";
 
-import {readBlobAsDataUrl} from "@/lib/scanner/image-data";
-
 export const useBlobDataUrl = (blob: Blob | null | undefined): string | null => {
   const [resolvedBlobUrl, setResolvedBlobUrl] = useState<{
     blob: Blob;
-    dataUrl: string;
+    objectUrl: string;
   } | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-
     if (!blob) {
       return;
     }
 
-    void readBlobAsDataUrl(blob)
-      .then((nextDataUrl) => {
-        if (!cancelled) {
-          setResolvedBlobUrl({
-            blob,
-            dataUrl: nextDataUrl,
-          });
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setResolvedBlobUrl((current) => {
-            if (current?.blob === blob) {
-              return null;
-            }
-
-            return current;
-          });
-        }
-      });
+    let cancelled = false;
+    const objectUrl = URL.createObjectURL(blob);
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setResolvedBlobUrl({
+          blob,
+          objectUrl,
+        });
+      }
+    });
 
     return () => {
       cancelled = true;
+      URL.revokeObjectURL(objectUrl);
     };
   }, [blob]);
 
-  if (!blob) {
-    return null;
-  }
-
-  return resolvedBlobUrl?.blob === blob ? resolvedBlobUrl.dataUrl : null;
+  return blob && resolvedBlobUrl?.blob === blob ? resolvedBlobUrl.objectUrl : null;
 };
