@@ -33,12 +33,13 @@ import {
   rotateImageData,
 } from "@/lib/scanner/image-data";
 import {isOpenCvReady} from "@/lib/scanner/opencv-runtime";
-import {orientPointsForPreview} from "@/lib/scanner/preview-orientation";
+import {mapPointsFromRotatedFrameToSource, orientPointsForPreview} from "@/lib/scanner/preview-orientation";
 import {
   createScannerPostProcessWorkerClient,
   type ScannerPostProcessWorkerClient,
 } from "@/lib/scanner/scanner-postprocess-worker-client";
 import {shellTauriAdbCommand} from "@/lib/tauri/adb";
+import {processTauriScannerPostProcessSourceFile} from "@/lib/tauri/scanner";
 import {getSelectedDesktopAdbSerial} from "@/lib/webadb/screenshot";
 import {useBlobDataUrl} from "@/hooks/use-blob-data-url";
 import {useSettingsStore} from "@/store/settings-store";
@@ -79,7 +80,9 @@ interface PreviewCaptureSnapshot {
 
 interface PreparedCaptureArtifact {
   sourceBlob: Blob;
-  frame: ImageData;
+  sourceWidth: number;
+  sourceHeight: number;
+  initialFrame: ImageData | null;
   points: Point[] | null;
   outputRotation: OrthogonalRotation;
   source?: string;
@@ -188,6 +191,50 @@ const formatDiagnostics = (payload: Record<string, unknown>): string => {
 
 const imageDataToPngBlob = async (frame: ImageData): Promise<Blob> => {
   return await encodeImageDataToPngBlob(frame);
+};
+
+const readImageBlobDimensions = async (blob: Blob): Promise<{ width: number; height: number }> => {
+  if (typeof createImageBitmap === "function") {
+    const bitmap = await createImageBitmap(blob);
+    try {
+      return {
+        width: bitmap.width,
+        height: bitmap.height,
+      };
+    } finally {
+      bitmap.close();
+    }
+  }
+
+  const decodedFrame = await decodeBlobToImageData(blob);
+  return {
+    width: decodedFrame.width,
+    height: decodedFrame.height,
+  };
+};
+
+const combineOrthogonalRotations = (
+  first: OrthogonalRotation,
+  second: OrthogonalRotation,
+): OrthogonalRotation => {
+  const normalized = (first + second) % 360;
+  switch (normalized) {
+    case 0:
+    case 90:
+    case 180:
+    case 270:
+      return normalized;
+    default:
+      throw new Error(`Unsupported orthogonal rotation combination: ${first} + ${second}.`);
+  }
+};
+
+const shouldDisableNativePostProcess = (message: string): boolean => {
+  const normalized = message.toLowerCase();
+  return normalized.includes("only available in tauri")
+    || normalized.includes("unknown command")
+    || normalized.includes("not found")
+    || normalized.includes("unsupported invoke key");
 };
 
 const parseFrontendPerfLog = (value: string): FrontendPerfSample | null => {
@@ -475,6 +522,7 @@ export default function ScannerView({
   const cvLoopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cvWorkerRef = useRef<ScannerCvWorkerClient | null>(null);
   const postProcessWorkerRef = useRef<ScannerPostProcessWorkerClient | null>(null);
+  const nativePostProcessUnavailableReasonRef = useRef<string | null>(null);
   const cvWorkerReadyRef = useRef(false);
   const cvDetectionInFlightRef = useRef(false);
   const lastCvFrameVersionRef = useRef(0);
@@ -999,7 +1047,9 @@ export default function ScannerView({
 
     return {
       sourceBlob: await imageDataToPngBlob(exportFrame),
-      frame: exportFrame,
+      sourceWidth: exportFrame.width,
+      sourceHeight: exportFrame.height,
+      initialFrame: exportFrame,
       points: exportPoints,
       outputRotation: 0,
     };
@@ -1084,24 +1134,18 @@ export default function ScannerView({
           outputRotation,
           imageEnhancement,
         });
-        const outputImage = new ImageData(
-          new Uint8ClampedArray(workerResult.pixels),
-          workerResult.outputWidth,
-          workerResult.outputHeight,
-        );
-        const encodeStartedAt = performance.now();
-        const blob = await imageDataToPngBlob(outputImage);
+        const blob = new Blob([workerResult.encodedBytes], { type: workerResult.encodedMimeType });
         return {
           blob,
           decodeMs: workerResult.decodeMs,
           inputWidth: workerResult.inputWidth,
           inputHeight: workerResult.inputHeight,
-          outputWidth: outputImage.width,
-          outputHeight: outputImage.height,
+          outputWidth: workerResult.outputWidth,
+          outputHeight: workerResult.outputHeight,
           perspectiveMs: workerResult.perspectiveMs,
           enhanceMs: workerResult.enhanceMs,
           rotateMs: workerResult.rotateMs,
-          encodeMs: performance.now() - encodeStartedAt,
+          encodeMs: workerResult.encodeMs,
         };
       } catch (error) {
         console.warn("[Scanner] Post-process worker failed, falling back to main thread:", error);
@@ -1122,6 +1166,38 @@ export default function ScannerView({
     documentPoints: Point[] | null,
     outputRotation: OrthogonalRotation = 0,
   ): Promise<ProcessedDocumentRenderResult> => {
+    // Keep enhancement-enabled flows on the existing OpenCV pipeline until
+    // native output parity is proven against the worker/local path.
+    const shouldTryNativePostProcess = !imageEnhancement && !nativePostProcessUnavailableReasonRef.current;
+    if (shouldTryNativePostProcess) {
+      try {
+        const nativeResult = await processTauriScannerPostProcessSourceFile(sourceFile, {
+          documentPoints,
+          outputRotation,
+          imageEnhancement,
+        });
+        const blob = new Blob([nativeResult.encodedBytes], {type: nativeResult.encodedMimeType});
+        return {
+          blob,
+          decodeMs: nativeResult.decodeMs,
+          inputWidth: nativeResult.inputWidth,
+          inputHeight: nativeResult.inputHeight,
+          outputWidth: nativeResult.outputWidth,
+          outputHeight: nativeResult.outputHeight,
+          perspectiveMs: nativeResult.perspectiveMs,
+          enhanceMs: nativeResult.enhanceMs,
+          rotateMs: nativeResult.rotateMs,
+          encodeMs: nativeResult.encodeMs,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (shouldDisableNativePostProcess(message)) {
+          nativePostProcessUnavailableReasonRef.current = message;
+        }
+        console.warn("[Scanner] Native post-process failed, falling back to worker:", error);
+      }
+    }
+
     const worker = await ensurePostProcessWorker();
     if (worker) {
       try {
@@ -1130,24 +1206,18 @@ export default function ScannerView({
           outputRotation,
           imageEnhancement,
         });
-        const outputImage = new ImageData(
-          new Uint8ClampedArray(workerResult.pixels),
-          workerResult.outputWidth,
-          workerResult.outputHeight,
-        );
-        const encodeStartedAt = performance.now();
-        const blob = await imageDataToPngBlob(outputImage);
+        const blob = new Blob([workerResult.encodedBytes], { type: workerResult.encodedMimeType });
         return {
           blob,
           decodeMs: workerResult.decodeMs,
           inputWidth: workerResult.inputWidth,
           inputHeight: workerResult.inputHeight,
-          outputWidth: outputImage.width,
-          outputHeight: outputImage.height,
+          outputWidth: workerResult.outputWidth,
+          outputHeight: workerResult.outputHeight,
           perspectiveMs: workerResult.perspectiveMs,
           enhanceMs: workerResult.enhanceMs,
           rotateMs: workerResult.rotateMs,
-          encodeMs: performance.now() - encodeStartedAt,
+          encodeMs: workerResult.encodeMs,
         };
       } catch (error) {
         console.warn("[Scanner] Post-process worker source decode failed, falling back to main thread:", error);
@@ -1219,16 +1289,29 @@ export default function ScannerView({
     const stillCaptureStartedAt = performance.now();
     const stillCapture = await source.captureStillFrame();
     const stillCaptureMs = performance.now() - stillCaptureStartedAt;
-    let decodedStillFrame: ImageData;
-    let decodeMs: number | null = null;
+    let stillDimensions: { width: number; height: number };
+    let dimensionSource = "capture-metadata";
     try {
-      const decodeStartedAt = performance.now();
-      decodedStillFrame = await decodeBlobToImageData(stillCapture.file);
-      decodeMs = performance.now() - decodeStartedAt;
+      if (
+        typeof stillCapture.width === "number"
+        && Number.isFinite(stillCapture.width)
+        && stillCapture.width > 0
+        && typeof stillCapture.height === "number"
+        && Number.isFinite(stillCapture.height)
+        && stillCapture.height > 0
+      ) {
+        stillDimensions = {
+          width: stillCapture.width,
+          height: stillCapture.height,
+        };
+      } else {
+        stillDimensions = await readImageBlobDimensions(stillCapture.file);
+        dimensionSource = "bitmap-fallback";
+      }
     } catch (error) {
       await logHighQualityStillFailureDiagnostics(stillCapture, error);
       const fallbackReason = error instanceof Error ? error.message : String(error);
-      throw new Error(`Failed to decode high-quality still payload: ${fallbackReason}`);
+      throw new Error(`Failed to read high-quality still dimensions: ${fallbackReason}`);
     }
     const previewDimensions = {
       width: snapshot.frame.width,
@@ -1236,54 +1319,51 @@ export default function ScannerView({
     };
     const orientationStartedAt = performance.now();
     const selectedRotation = resolveStillFrameRotation(previewDimensions, {
-      width: decodedStillFrame.width,
-      height: decodedStillFrame.height,
+      width: stillDimensions.width,
+      height: stillDimensions.height,
     });
-    const selectedStillFrame = selectedRotation.rotation === 0
-      ? decodedStillFrame
-      : rotateImageData(decodedStillFrame, selectedRotation.rotation);
     const orientationMs = performance.now() - orientationStartedAt;
 
     const mappedPoints = snapshot.points && snapshot.points.length === 4
-      ? scalePointsBetweenFrames(snapshot.points, previewDimensions, {
-          width: selectedRotation.width,
-          height: selectedRotation.height,
-        })
+      ? mapPointsFromRotatedFrameToSource(
+          scalePointsBetweenFrames(
+            snapshot.points,
+            previewDimensions,
+            {
+              width: selectedRotation.width,
+              height: selectedRotation.height,
+            },
+          ),
+          stillDimensions.width,
+          stillDimensions.height,
+          selectedRotation.rotation,
+        )
       : null;
-    // Keep the HQ still in source space and defer preview-orientation rotation to async post-process.
-    const outputRotation: OrthogonalRotation = previewOrientationRef.current === "portrait" ? 90 : 0;
-    let sourceBlob: Blob = stillCapture.file;
-    let sourceBlobMode = "original";
-    let sourceEncodeMs: number | null = null;
-
-    if (selectedStillFrame !== decodedStillFrame) {
-      const sourceEncodeStartedAt = performance.now();
-      sourceBlob = await imageDataToPngBlob(selectedStillFrame);
-      sourceEncodeMs = performance.now() - sourceEncodeStartedAt;
-      sourceBlobMode = "rotated-png";
-    } else if (outputRotation !== 0) {
-      sourceBlobMode = "original-deferred-rotation";
-    }
+    const outputRotation = combineOrthogonalRotations(
+      selectedRotation.rotation,
+      previewOrientationRef.current === "portrait" ? 90 : 0,
+    );
 
     const totalMs = performance.now() - totalStartedAt;
     console.info(
       `[perf:still-prepare] ${stillCapture.transport} | total=${totalMs.toFixed(1)}ms`
       + ` capture=${stillCaptureMs.toFixed(1)}ms`
-      + ` decode=${formatPerfMetric(decodeMs)}ms`
       + ` orient=${orientationMs.toFixed(1)}ms`
-      + ` sourceEncode=${formatPerfMetric(sourceEncodeMs)}ms`
       + ` rotation=${selectedRotation.rotation}`
       + ` outputRotation=${outputRotation}`
       + ` aspectDelta=${selectedRotation.aspectDelta.toFixed(4)}`
-      + ` sourceBlob=${sourceBlobMode}`
+      + ` sourceBlob=original-source-space`
+      + ` dimensionSource=${dimensionSource}`
       + ` | preview=${previewDimensions.width}x${previewDimensions.height}`
-      + ` still=${decodedStillFrame.width}x${decodedStillFrame.height}`
+      + ` still=${stillDimensions.width}x${stillDimensions.height}`
       + ` mapped=${selectedRotation.width}x${selectedRotation.height}`,
     );
 
     return {
-      sourceBlob,
-      frame: selectedStillFrame,
+      sourceBlob: stillCapture.file,
+      sourceWidth: stillDimensions.width,
+      sourceHeight: stillDimensions.height,
+      initialFrame: null,
       points: mappedPoints,
       outputRotation,
       source: stillCapture.source,
@@ -1385,7 +1465,7 @@ export default function ScannerView({
 
       const processedDocument = processingFrame
         ? await renderProcessedDocumentBlob(
-            processingFrame,
+            processingFrame as ImageData,
             resolvedPoints,
             outputRotation,
           )
@@ -1511,8 +1591,8 @@ export default function ScannerView({
       error: null,
       documentDetected,
       captureSource,
-      sourceWidth: artifact.frame.width,
-      sourceHeight: artifact.frame.height,
+      sourceWidth: artifact.sourceWidth,
+      sourceHeight: artifact.sourceHeight,
       outputNameBase,
       outputRotation: artifact.outputRotation,
     });
@@ -1524,7 +1604,7 @@ export default function ScannerView({
         outputNameBase,
         pointsForDocument,
         artifact.outputRotation,
-        artifact.frame,
+        artifact.initialFrame ?? undefined,
         {
           // Preserve preview-mapped corners; automatic HQ re-detect was overriding
           // already-accurate points with worse source-image contours.
@@ -1535,8 +1615,8 @@ export default function ScannerView({
 
     setCaptureDebug({
       lastCaptureSource: captureSource,
-      lastCaptureWidth: artifact.frame.width,
-      lastCaptureHeight: artifact.frame.height,
+      lastCaptureWidth: artifact.sourceWidth,
+      lastCaptureHeight: artifact.sourceHeight,
       lastCaptureAt: Date.now(),
       lastCaptureError: null,
       lastCaptureDocumentDetected: documentDetected,
@@ -1760,7 +1840,7 @@ export default function ScannerView({
 
             const stableHoldSatisfied = Boolean(
               stable
-              && detectedPoints
+              && effectivePoints
               && stableSinceRef.current !== null
               && now - stableSinceRef.current >= AUTO_CAPTURE_STABLE_HOLD_MS,
             );
@@ -1779,10 +1859,10 @@ export default function ScannerView({
             if (
               autoCaptureRef.current
               && stableHoldSatisfied
-              && detectedPoints
+              && effectivePoints
             ) {
               void captureDocument(
-                createCaptureSnapshot(frameForDetection, detectedPoints),
+                createCaptureSnapshot(frameForDetection, effectivePoints),
                 "auto",
               );
             }
@@ -2071,7 +2151,6 @@ export default function ScannerView({
       }
 
       void ensureCvWorker();
-      void ensurePostProcessWorker();
       setStatus("streaming");
       setConnectionDebug({
         reconnectState: "connected",
@@ -2104,7 +2183,6 @@ export default function ScannerView({
     clearProcessingCooldown,
     clearCvLoop,
     ensureCvWorker,
-    ensurePostProcessWorker,
     isFrameSourceSessionCurrent,
     invalidatePendingCaptureCommits,
     publishCvDebug,

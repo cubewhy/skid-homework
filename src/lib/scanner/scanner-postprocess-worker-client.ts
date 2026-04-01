@@ -20,11 +20,13 @@ export interface ScannerPostProcessWorkerResult {
   perspectiveMs: number | null;
   enhanceMs: number | null;
   rotateMs: number | null;
+  encodeMs: number;
   inputWidth: number;
   inputHeight: number;
   outputWidth: number;
   outputHeight: number;
-  pixels: ArrayBuffer;
+  encodedMimeType: "image/png";
+  encodedBytes: ArrayBuffer;
 }
 
 interface PendingProcessRequest {
@@ -213,11 +215,13 @@ export class ScannerPostProcessWorkerClient {
           perspectiveMs: message.perspectiveMs,
           enhanceMs: message.enhanceMs,
           rotateMs: message.rotateMs,
+          encodeMs: message.encodeMs,
           inputWidth: message.inputWidth,
           inputHeight: message.inputHeight,
           outputWidth: message.outputWidth,
           outputHeight: message.outputHeight,
-          pixels: message.pixels,
+          encodedMimeType: message.encodedMimeType,
+          encodedBytes: message.encodedBytes,
         });
         return;
       }

@@ -34,8 +34,21 @@ type WorkerImageDecoderConstructor = new (init: {
 const OPEN_CV_INIT_TIMEOUT_MS = 12_000;
 const workerScope = self as WorkerScopeWithOpenCv;
 let openCvReadyPromise: Promise<void> | null = null;
+let pngEncodeSurface: {
+  canvas: OffscreenCanvas;
+  context: OffscreenCanvasRenderingContext2D;
+} | null = null;
+let pngEncodeQueue: Promise<void> = Promise.resolve();
 
-const postWorkerMessage = (message: ScannerPostProcessWorkerResponse): void => {
+const postWorkerMessage = (
+  message: ScannerPostProcessWorkerResponse,
+  transfer: Transferable[] = [],
+): void => {
+  if (transfer.length > 0) {
+    workerScope.postMessage(message, transfer);
+    return;
+  }
+
   workerScope.postMessage(message);
 };
 
@@ -67,6 +80,62 @@ const bitmapToImageDataInWorker = (bitmap: ImageBitmap): ImageData => {
 
   context.drawImage(bitmap, 0, 0);
   return context.getImageData(0, 0, bitmap.width, bitmap.height);
+};
+
+const getPngEncodeSurfaceInWorker = (
+  width: number,
+  height: number,
+): {
+  canvas: OffscreenCanvas;
+  context: OffscreenCanvasRenderingContext2D;
+} => {
+  const OffscreenCanvasConstructor = (workerScope as WorkerScopeWithOpenCv & {
+    OffscreenCanvas?: typeof OffscreenCanvas;
+  }).OffscreenCanvas;
+  if (typeof OffscreenCanvasConstructor !== "function") {
+    throw new Error("OffscreenCanvas is unavailable in the scanner post-process worker.");
+  }
+
+  if (!pngEncodeSurface) {
+    const canvas = new OffscreenCanvasConstructor(width, height);
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("Could not get an OffscreenCanvas 2D context for post-process PNG encode.");
+    }
+
+    pngEncodeSurface = {
+      canvas,
+      context,
+    };
+  }
+
+  if (pngEncodeSurface.canvas.width !== width) {
+    pngEncodeSurface.canvas.width = width;
+  }
+  if (pngEncodeSurface.canvas.height !== height) {
+    pngEncodeSurface.canvas.height = height;
+  }
+
+  return pngEncodeSurface;
+};
+
+const encodeImageDataToPngBytesInWorker = async (image: ImageData): Promise<ArrayBuffer> => {
+  const previousEncode = pngEncodeQueue;
+  let releaseEncode: (() => void) | undefined;
+  pngEncodeQueue = new Promise<void>((resolve) => {
+    releaseEncode = resolve;
+  });
+
+  await previousEncode;
+
+  try {
+    const surface = getPngEncodeSurfaceInWorker(image.width, image.height);
+    surface.context.putImageData(image, 0, 0);
+    const blob = await surface.canvas.convertToBlob({ type: "image/png" });
+    return await blob.arrayBuffer();
+  } finally {
+    releaseEncode?.();
+  }
 };
 
 const decodeBlobToImageDataInWorker = async (sourceBlob: Blob): Promise<ImageData> => {
@@ -297,6 +366,10 @@ const handleProcess = async (message: ScannerPostProcessWorkerProcessRequest): P
       rotateMs = performance.now() - rotateStartedAt;
     }
 
+    const encodeStartedAt = performance.now();
+    const encodedBytes = await encodeImageDataToPngBytesInWorker(processedImage);
+    const encodeMs = performance.now() - encodeStartedAt;
+
     postWorkerMessage({
       type: "result",
       requestId: message.requestId,
@@ -305,12 +378,14 @@ const handleProcess = async (message: ScannerPostProcessWorkerProcessRequest): P
       perspectiveMs,
       enhanceMs,
       rotateMs,
+      encodeMs,
       inputWidth: imageData.width,
       inputHeight: imageData.height,
       outputWidth: processedImage.width,
       outputHeight: processedImage.height,
-      pixels: processedImage.data.buffer,
-    });
+      encodedMimeType: "image/png",
+      encodedBytes,
+    }, [encodedBytes]);
   } catch (error) {
     postWorkerError({
       type: "error",

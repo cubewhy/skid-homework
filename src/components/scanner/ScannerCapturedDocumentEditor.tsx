@@ -5,6 +5,7 @@ import type {Point} from "@/lib/scanner";
 import type {ScannerCapturedDocument} from "@/store/scanner-store";
 import {Button} from "@/components/ui/button";
 import {useBlobDataUrl} from "@/hooks/use-blob-data-url";
+import {mapPointFromRotatedFrameToSource} from "@/lib/scanner/preview-orientation";
 import {
   Dialog,
   DialogContent,
@@ -58,33 +59,6 @@ const getRotatedDimensions = (
   }
 
   return { width, height };
-};
-
-const mapDisplayPointToSource = (
-  point: Point,
-  sourceWidth: number,
-  sourceHeight: number,
-  rotation: OrthogonalRotation,
-): Point => {
-  switch (rotation) {
-    case 90:
-      return {
-        x: point.y,
-        y: sourceHeight - point.x,
-      };
-    case 180:
-      return {
-        x: sourceWidth - point.x,
-        y: sourceHeight - point.y,
-      };
-    case 270:
-      return {
-        x: sourceWidth - point.y,
-        y: point.x,
-      };
-    default:
-      return point;
-  }
 };
 
 const buildDefaultPoints = (width: number, height: number): Point[] => {
@@ -204,7 +178,7 @@ function ScannerCapturedDocumentEditorBody({
       0,
       displayDimensions.height,
     );
-    const sourcePoint = mapDisplayPointToSource(
+    const sourcePoint = mapPointFromRotatedFrameToSource(
       {x, y},
       document.sourceWidth,
       document.sourceHeight,

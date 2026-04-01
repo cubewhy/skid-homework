@@ -34,11 +34,13 @@ export interface ScannerPostProcessWorkerResultResponse {
   perspectiveMs: number | null;
   enhanceMs: number | null;
   rotateMs: number | null;
+  encodeMs: number;
   inputWidth: number;
   inputHeight: number;
   outputWidth: number;
   outputHeight: number;
-  pixels: ArrayBuffer;
+  encodedMimeType: "image/png";
+  encodedBytes: ArrayBuffer;
 }
 
 export interface ScannerPostProcessWorkerErrorResponse {
