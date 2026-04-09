@@ -36,7 +36,7 @@ export default function InspectDialog({
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
-    toast.success(t("dev.copy.success", { defaultValue: "Copied" }));
+    toast.success(t("copy.success", { defaultValue: "Copied" }));
   };
 
   return (
