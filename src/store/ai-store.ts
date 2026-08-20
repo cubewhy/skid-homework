@@ -72,6 +72,11 @@ export const DEFAULT_GEMINI_BASE_URL =
 export const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
 export const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 
+export const DEFAULT_BASE_BY_PROVIDER: Record<AiProvider, string> = {
+  gemini: DEFAULT_GEMINI_BASE_URL,
+  openai: DEFAULT_OPENAI_BASE_URL,
+};
+
 function loadLegacyGemini(): {
   source: Partial<AiSource>;
   model: string;

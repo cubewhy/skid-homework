@@ -46,7 +46,7 @@ Skid-Homework 不会要求你下载桌面软件, 一切东西都在浏览器内�
 - 支持输出图片 ([支持情况](#画图工具支持情况))
 - 支持本地持久化解析 (实验性, 若遇到问题请清空网页数据)
 - 墨水屏友好 (仅浅色模式, 如果配色方案有问题请开 issue)
-- ADB 截屏支持 (**实验性** 需要浏览器支持 WebUSB)
+- ADB 截屏支持（Web 端使用 WebUSB；Tauri 桌面端支持原生 Remote ADB pair/connect）
 
 ## 现在尝试
 
@@ -117,7 +117,10 @@ LLM 响应耗费时间通常比题库长
 
 ### 我的电脑上没有摄像头, 请帮帮我
 
-我们支持ADB, 可以连接你的安卓手机进行屏幕截图, 需要浏览器支持 WebUSB
+我们支持 ADB，可以连接你的安卓手机进行屏幕截图：
+
+- Web 端：需要浏览器支持 WebUSB
+- Tauri 桌面端：支持通过 Android 无线调试进行 Remote ADB pair/connect
 
 此过程在本地进行, 不会窃取隐私。
 
@@ -265,6 +268,37 @@ docker build -t skid-homework .
 ```shell
 pnpx i18next-cli types
 ```
+
+### Tauri 多平台发布
+
+仓库提供了 `Tauri Release` GitHub Actions 工作流，可手动触发并生成 Tauri 发布产物：
+
+- Android：APK / AAB
+- Linux：AppImage / `.deb` / `.rpm`
+- Windows：NSIS / MSI
+- macOS：Intel 与 Apple Silicon 分别构建
+
+该工作流会自动：
+
+- 基于现有 Git Tag 计算下一个语义化版本；
+- 生成适合本项目的 GitHub Release Markdown 页面；
+- 汇总各平台构建产物并上传到同一个 Release。
+
+也可以在默认分支 `main` 的提交信息末尾追加自动发布标记：
+
+- `[release major]` / `[release minor]` / `[release patch]`
+- `[pre-release major]` / `[pre-release minor]` / `[pre-release patch]`
+
+标记必须完全匹配以上小写格式，并位于提交信息末尾。
+
+普通目标提交可直接使用 `github.token`。`github.token` 不能为修改了 `.github/workflows/` 的提交创建 tag。发布此类提交时，请设置 `WORKFLOW_GIT_TOKEN`。该 token 必须具有仓库内容写入权限和 workflow 权限。
+
+如果需要为 Android Release 构建启用签名，请配置以下仓库 Secrets：
+
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
 
 ## License
 

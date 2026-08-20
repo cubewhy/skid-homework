@@ -1,0 +1,9 @@
+{
+  "identifier": "com.skidhomework.app",
+  "build": {
+    "frontendDist": "../out",
+    "devUrl": "http://localhost:3000",
+    "beforeDevCommand": "pnpm tauri:android:dev:frontend",
+    "beforeBuildCommand": "pnpm tauri:android:build:frontend"
+  }
+}

@@ -5,6 +5,16 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+    height: 100%;
+}
+
+body {
+    min-height: 100dvh;
+    overflow: hidden;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -127,4 +137,24 @@
   .safe-area {
     padding-top: var(--safe-top);
   }
+
+    .app-scroll-container {
+        height: 100%;
+        overflow-x: hidden;
+        overflow-y: auto;
+    }
 }
+
+/*
+ * Fix react-photo-view portals inside Radix Dialog (modal).
+ * Radix sets `pointer-events: none` on document.body when a modal Dialog
+ * is open (via disableOutsidePointerEvents). PhotoView's portal renders as
+ * a direct child of body and inherits pointer-events: none, which blocks
+ * all mouse interactions (cursor, drag, click, zoom).
+ * Note: Do NOT override z-index here — PhotoView's default z-index: 2000
+ * already exceeds Dialog's z-50. Lowering it would cause regressions.
+ */
+.PhotoView-Portal {
+  pointer-events: auto !important;
+}
+

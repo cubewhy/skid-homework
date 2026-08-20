@@ -6,6 +6,12 @@ export interface SourceModels {
   models: AiModelSummary[];
 }
 
+export interface SourceFetchError {
+  sourceId: string;
+  sourceName: string;
+  code: string; // "auth", "rate-limit", "network", "unknown"
+}
+
 // Cache stores only sourceId to avoid leaking API keys
 interface CachedSourceModels {
   sourceId: string;
@@ -123,6 +129,22 @@ function toCacheFormat(data: SourceModels[]): CachedSourceModels[] {
   }));
 }
 
+function classifyError(error: unknown): string {
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    if (msg.includes("401") || msg.includes("403") || msg.includes("invalid") || msg.includes("unauthorized") || msg.includes("forbidden")) {
+      return "auth";
+    }
+    if (msg.includes("429") || msg.includes("rate") || msg.includes("quota")) {
+      return "rate-limit";
+    }
+    if (msg.includes("network") || msg.includes("fetch") || msg.includes("econnrefused") || msg.includes("timeout")) {
+      return "network";
+    }
+  }
+  return "unknown";
+}
+
 export function useAvailableModels() {
   const sources = useAiStore((s) => s.sources);
   const getClientForSource = useAiStore((s) => s.getClientForSource);
@@ -134,6 +156,8 @@ export function useAvailableModels() {
 
   const [sourceModelsMap, setSourceModelsMap] = useState<SourceModels[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [fetchErrors, setFetchErrors] = useState<SourceFetchError[]>([]);
+  const [hasFetched, setHasFetched] = useState(false);
   const [sourcesHash, setSourcesHash] = useState<string>("");
 
   // Track sources hash to detect API key changes (sync version for comparisons)
@@ -169,6 +193,7 @@ export function useAvailableModels() {
   const forceRefetch = useCallback(async () => {
     setIsLoading(true);
     const results: SourceModels[] = [];
+    const errors: SourceFetchError[] = [];
 
     for (const source of enabledSources) {
       try {
@@ -179,6 +204,11 @@ export function useAvailableModels() {
         }
       } catch (error) {
         console.error(`Failed to fetch models for ${source.name}`, error);
+        errors.push({
+          sourceId: source.id,
+          sourceName: source.name,
+          code: classifyError(error),
+        });
       }
     }
 
@@ -187,6 +217,8 @@ export function useAvailableModels() {
       const hash = await generateSourcesHashAsync(enabledSources);
       writeCache(toCacheFormat(results), hash);
       setSourceModelsMap(results);
+      setFetchErrors(errors);
+      setHasFetched(true);
       setIsLoading(false);
     }
   }, [enabledSources, getClientForSource]);
@@ -204,8 +236,10 @@ export function useAvailableModels() {
           const sourcesChanged = cache.sourcesHash !== sourcesHash;
 
           if (!isExpired && !sourcesChanged) {
-            // Use cached data (hydrate with current sources)
-            setSourceModelsMap(hydrateCachedData(cache.data, sources));
+            // Use cached data (hydrate with current sources via ref)
+            setSourceModelsMap(hydrateCachedData(cache.data, useAiStore.getState().sources));
+            setFetchErrors([]);
+            setHasFetched(true);
             return;
           }
         }
@@ -214,7 +248,7 @@ export function useAvailableModels() {
       // Fetch fresh data
       await forceRefetch();
     },
-    [forceRefetch, sourcesHash, sources]
+    [forceRefetch, sourcesHash]
   );
 
   useEffect(() => {
@@ -244,9 +278,11 @@ export function useAvailableModels() {
         const cacheSourcesChanged = cache.sourcesHash !== asyncHash;
 
         if (!isExpired && !cacheSourcesChanged) {
-          // Use cached data (hydrate with current sources)
+          // Use cached data (hydrate with current sources via ref)
           if (!cancelled) {
-            setSourceModelsMap(hydrateCachedData(cache.data, sources));
+            setSourceModelsMap(hydrateCachedData(cache.data, useAiStore.getState().sources));
+            setFetchErrors([]);
+            setHasFetched(true);
           }
           return;
         }
@@ -255,6 +291,7 @@ export function useAvailableModels() {
       // Fetch fresh data
       setIsLoading(true);
       const results: SourceModels[] = [];
+      const errors: SourceFetchError[] = [];
 
       for (const source of enabledSources) {
         try {
@@ -265,12 +302,19 @@ export function useAvailableModels() {
           }
         } catch (error) {
           console.error(`Failed to fetch models for ${source.name}`, error);
+          errors.push({
+            sourceId: source.id,
+            sourceName: source.name,
+            code: classifyError(error),
+          });
         }
       }
 
       if (!cancelled) {
         writeCache(toCacheFormat(results), asyncHash);
         setSourceModelsMap(results);
+        setFetchErrors(errors);
+        setHasFetched(true);
         setIsLoading(false);
       }
     };
@@ -280,7 +324,10 @@ export function useAvailableModels() {
     return () => {
       cancelled = true;
     };
-  }, [enabledSources, getClientForSource, sourcesHashSync, sources]);
+    // NOTE: `sources` is intentionally excluded; cache hydration reads the
+    // latest sources from the store to avoid refetching on every store update.
+
+  }, [enabledSources, getClientForSource, sourcesHashSync]);
 
   // Flatten all models for simple list access
   const allModels = useMemo(() => {
@@ -295,6 +342,8 @@ export function useAvailableModels() {
     sourceModelsMap,
     allModels,
     isLoading,
+    fetchErrors,
+    hasFetched,
     refetch: fetchModels,
     forceRefetch, // Force refresh bypassing cache
   };

@@ -1,10 +1,10 @@
 "use client";
 import { motion } from "framer-motion";
 import { Camera, Rocket, ShieldCheck, Sparkles } from "lucide-react";
-import { SubmitEvent, useMemo, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   DEFAULT_GEMINI_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
@@ -15,11 +15,11 @@ import {
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
-} from "../ui/accordion";
-import { Label } from "../ui/label";
+} from "@/components/ui/accordion";
+import { Label } from "@/components/ui/label";
 import { Trans, useTranslation } from "react-i18next";
 
-export default function InitPage() {
+export default function WebInitPage() {
   const sources = useAiStore((s) => s.sources);
   const activeSourceId = useAiStore((s) => s.activeSourceId);
   const setActiveSource = useAiStore((s) => s.setActiveSource);
@@ -37,9 +37,9 @@ export default function InitPage() {
 
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { t } = useTranslation("commons", { keyPrefix: "init-page" });
+  const { t } = useTranslation("commons", { keyPrefix: "web-init-page" });
 
-  const handleSubmit = (e: SubmitEvent) => {
+  const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!activeSource) return;
     const trimmedKey = key.trim();
@@ -141,7 +141,6 @@ export default function InitPage() {
               </li>
             </motion.ul>
 
-            {/* Main form for API key submission */}
             <motion.form
               onSubmit={handleSubmit}
               initial={{ opacity: 0, y: 12 }}
@@ -182,7 +181,6 @@ export default function InitPage() {
                 </Button>
               </div>
 
-              {/* START: Advanced settings section, collapsible */}
               <Accordion type="single" collapsible className="w-full max-w-md">
                 <AccordionItem value="advanced-settings" className="border-b-0">
                   <AccordionTrigger className="text-sm hover:no-underline">
@@ -190,7 +188,6 @@ export default function InitPage() {
                   </AccordionTrigger>
                   <AccordionContent>
                     <div className="space-y-2 mx-1">
-                      {/* Input for custom API Base URL */}
                       <Label htmlFor="base-url" className="text-xs">
                         {t("form.advanced.base-url-label")}
                       </Label>
@@ -213,7 +210,6 @@ export default function InitPage() {
                   </AccordionContent>
                 </AccordionItem>
               </Accordion>
-              {/* END: Advanced settings section */}
             </motion.form>
             <p className="mt-3 text-xs text-slate-400">
               {activeSource?.provider === "gemini" ? (
@@ -285,7 +281,6 @@ export default function InitPage() {
             href="https://github.com/cubewhy/skid-homework"
             className="underline"
           >
-            {/* {t("footer.source")} */}
             https://github.com/cubewhy/skid-homework
           </a>
         </div>

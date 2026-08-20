@@ -46,8 +46,8 @@ export default function ActionsCard({
   const router = useRouter();
 
   const {
-    showModelSelectorInScanner,
-    showOnlineSearchInScanner,
+    showModelSelectorInScanPage,
+    showOnlineSearchInScanPage,
     onlineSearchEnabled,
     setOnlineSearchEnabled,
   } = useSettingsStore((s) => s);
@@ -103,7 +103,7 @@ export default function ActionsCard({
 
         <UploadFilesInfo itemsLength={items.length} totalBytes={totalBytes} />
 
-        {showModelSelectorInScanner && <ModelSelectorPopover />}
+        {showModelSelectorInScanPage && <ModelSelectorPopover />}
 
         <ActionsArea
           itemsLength={items.length}
@@ -112,7 +112,7 @@ export default function ActionsCard({
           layout={layout}
         />
 
-        {showOnlineSearchInScanner && (
+        {showOnlineSearchInScanPage && (
           <div className="flex w-full">
             <OnlineSearchToggle
               checked={onlineSearchEnabled}

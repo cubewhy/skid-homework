@@ -258,10 +258,45 @@
       "reconnect": "Reconnect ADB",
       "screenshot": "ADB Screenshot",
       "connecting": "Connecting...",
+      "connected": "Connected to {{serial}}.",
+      "paired": "Pairing succeeded. Now connect using the device's connect address.",
       "screenshot-busy": "Capturing...",
-      "screenshot-hint": "Capture a screenshot from a connected Android device via ADB (WebUSB)",
+      "screenshot-hint": "Capture a screenshot from a connected Android device via ADB",
       "menu-aria-label": "ADB Menu",
-      "capture-timeout": "ADB screenshot timed out. Please check the connection and try again."
+      "capture-timeout": "ADB screenshot timed out. Please check the connection and try again.",
+      "remote-dialog": {
+        "title": "Remote ADB Pair / Connect",
+        "description": "Use the local ADB server, pick an existing device, or use Android Wireless debugging to pair and connect.",
+        "cancel": "Cancel",
+        "tabs": {
+          "devices": "Devices",
+          "connect": "Connect",
+          "pair": "Pair"
+        },
+        "devices": {
+          "description": "Select a ready device that already exists in the local ADB server list.",
+          "refresh": "Refresh",
+          "loading": "Loading devices...",
+          "empty": "No ADB devices were found. Connect a USB device or use the Pair / Connect tabs first.",
+          "select": "Use Device",
+          "selected": "Selected",
+          "selected-badge": "Selected"
+        },
+        "connect": {
+          "description": "Use this if the device has already been paired with this computer.",
+          "address": "Device address",
+          "placeholder": "192.168.1.23:5555",
+          "submit": "Connect"
+        },
+        "pair": {
+          "description": "Enter the pairing address and code from Android Wireless debugging. After pairing, switch to the Connect tab.",
+          "pair-address": "Pairing address",
+          "pair-address-placeholder": "192.168.1.23:37123",
+          "pairing-code": "Pairing code",
+          "pairing-code-placeholder": "123456",
+          "submit": "Pair"
+        }
+      }
     },
     "toasts": {
       "adb-failed": "Something went wrong with ADB: {{error}}",
@@ -433,7 +468,6 @@
         "none": "No model selected",
         "unknown": "Unknown model ({{name}})"
       },
-      "show-selector-in-scanner": "Show model selector in scanner",
       "refresh": "Refresh models",
       "manual": {
         "title": "Custom model",
@@ -453,7 +487,8 @@
         "label": "When selected model is unavailable, fall back to",
         "desc": "Automatically switch to this model when the primary model fails",
         "none": "None"
-      }
+      },
+      "show-selector-in-scan-page": "Show model selector on scan page"
     },
     "thinking": {
       "title": "Thinking Settings",
@@ -468,7 +503,7 @@
           "enabled": "Enabled online search"
         },
         "desc": "Allow the assistant to call web search tools when needed.",
-        "show-toggle-in-scanner": "Show online search toggle in scanner"
+        "show-toggle-in-scan-page": "Show online search toggle on scan page"
       }
     },
     "traits": {
@@ -516,38 +551,85 @@
     "item-label": "Problem {{index}}"
   },
   "init-page": {
-    "tagline": "Local • Private • Free",
-    "headline": {
-      "highlight": "Welcome to SkidHomework",
-      "subtitle": "Escape the homework grind."
+    "welcome": {
+      "title": "Welcome to SkidHomework",
+      "tagline": "Local · Private · Free",
+      "description": "Prefer Khan Academy-style self-study but still get stuck with endless assignments? SkidHomework runs locally, respects your privacy, and helps you focus on learning.",
+      "features": {
+        "privacy": "No telemetry or data collection",
+        "camera": "Snap homework and get step-by-step help",
+        "fast": "Fast setup — configure and go"
+      }
     },
-    "intro": "Prefer Khan Academy–style self-study but still get stuck with endless assignments? SkidHomework runs locally, respects your privacy, and helps you focus on learning instead of busywork.",
-    "features": {
-      "telemetry": "No telemetry or spammy calls. Just the Gemini API.",
-      "camera": "Snap homework and get step-by-step help.",
-      "setup": "Fast setup — paste your Gemini API key and go."
+    "ai-config": {
+      "title": "AI Service",
+      "description": "Configure one or more AI providers. You can skip this and set it up later in Settings.",
+      "api-key-placeholder": "{{provider}} API Key",
+      "base-url-label": "Custom API Base URL",
+      "base-url-placeholder": "Default endpoint for {{provider}}",
+      "base-url-helper": "Leave blank to use the default endpoint.",
+      "api-hint-gemini": "Get an API key at <link>Google AI Studio</link>.",
+      "api-hint-openai": "Get an API key at <link>OpenAI Dashboard</link>.",
+      "storage-note": "Keys are stored locally and never sent to our servers.",
+      "enabled": "Enabled",
+      "status": {
+        "loading": "Verifying API keys...",
+        "connected": "Connected successfully.",
+        "errors": {
+          "auth": "Invalid API key or access denied.",
+          "rate-limit": "Rate limited. Please try again later.",
+          "network": "Connection failed. Check the URL and network.",
+          "unknown": "Failed to connect. Check the key and URL."
+        }
+      }
     },
-    "form": {
-      "key-placeholder": "{{provider}} API Key",
-      "submit": "Get My Time Back!",
-      "advanced": {
-        "title": "Advanced",
-        "base-url-label": "API Base URL (optional)",
-        "base-url-placeholder": "Default endpoint for {{provider}}",
-        "base-url-helper": "Leave blank to use the default endpoint for {{provider}}."
+    "preferences": {
+      "title": "Preferences",
+      "description": "Customize your experience. All of these can be changed later in Settings.",
+      "theme": {
+        "label": "Theme",
+        "system": "System",
+        "light": "Light",
+        "dark": "Dark"
       },
-      "api-hint": "Get an API key at <link>Google AI Studio</link>.",
-      "storage-note": "We store your key locally using encrypted browser storage and never send it to our servers.",
-      "provider": {
-        "label": "AI provider"
+      "language": {
+        "label": "Language",
+        "en": "English",
+        "zh": "中文"
       },
-      "api-hint-openai": "Get an API key at <link>OpenAI Dashboard</link>."
+      "model": {
+        "label": "AI Model",
+        "loading": "Loading models...",
+        "no-key": "Enter an API key first to see available models."
+      }
     },
-    "preview": {
-      "title": "Homework Camera",
-      "ocr": "OCR",
-      "steps": "Steps",
-      "hints": "Hints"
+    "advanced": {
+      "title": "Advanced Settings",
+      "description": "Fine-tune your experience. These can all be changed later in Settings.",
+      "thinking-budget": {
+        "label": "Thinking Budget",
+        "tip": "Maximum tokens for AI reasoning (Gemini only).",
+        "unit": "tokens"
+      },
+      "online-search": "Online Search",
+      "online-search-tip": "Allow AI to search the web for additional context.",
+      "max-retries": {
+        "label": "Max Retries",
+        "tip": "Maximum automatic retries when API calls fail (0-10)."
+      },
+      "fallback": {
+        "label": "Fallback Model",
+        "tip": "Automatically switch to this model when the primary fails.",
+        "none": "None",
+        "no-models": "Configure an API key to see available models."
+      }
+    },
+    "navigation": {
+      "back": "Back",
+      "next": "Next",
+      "skip": "Skip",
+      "finish": "Get Started",
+      "advanced": "Advanced Settings"
     },
     "footer": {
       "notice": "Licensed under GPLv3, created by cubewhy.",
@@ -682,10 +764,7 @@
     "problem": "Problem",
     "answer": "Answer",
     "explanation": "Explanation",
-    "online-search": "Online Search",
-    "copy": {
-      "success": "Copied"
-    }
+    "online-search": "Online Search"
   },
   "sources": {
     "upload": "Upload",
@@ -699,9 +778,43 @@
       "web-search-not-supported": "Model {{model}} does not support web search, continuing without it"
     }
   },
-  "dev": {
-    "copy": {
-      "success": "Copied"
+  "web-init-page": {
+    "tagline": "Local • Private • Free",
+    "headline": {
+      "highlight": "Welcome to SkidHomework",
+      "subtitle": "Escape the homework grind."
+    },
+    "intro": "Prefer Khan Academy–style self-study but still get stuck with endless assignments? SkidHomework runs locally, respects your privacy, and helps you focus on learning instead of busywork.",
+    "features": {
+      "telemetry": "No telemetry or spammy calls. Just the Gemini API.",
+      "camera": "Snap homework and get step-by-step help.",
+      "setup": "Fast setup — paste your Gemini API key and go."
+    },
+    "form": {
+      "key-placeholder": "{{provider}} API Key",
+      "submit": "Get My Time Back!",
+      "advanced": {
+        "title": "Advanced",
+        "base-url-label": "API Base URL (optional)",
+        "base-url-placeholder": "Default endpoint for {{provider}}",
+        "base-url-helper": "Leave blank to use the default endpoint for {{provider}}."
+      },
+      "api-hint": "Get an API key at <link>Google AI Studio</link>.",
+      "storage-note": "We store your key locally using encrypted browser storage and never send it to our servers.",
+      "provider": {
+        "label": "AI provider"
+      },
+      "api-hint-openai": "Get an API key at <link>OpenAI Dashboard</link>."
+    },
+    "preview": {
+      "title": "Homework Camera",
+      "ocr": "OCR",
+      "steps": "Steps",
+      "hints": "Hints"
+    },
+    "footer": {
+      "notice": "Licensed under GPLv3, created by cubewhy.",
+      "source": "Source Code"
     }
   }
 }

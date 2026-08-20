@@ -9,11 +9,10 @@ import {
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
-import { AiSource, ImportAISourceModel, useAiStore } from "@/store/ai-store";
+import { AiSource, DEFAULT_BASE_BY_PROVIDER, ImportAISourceModel, useAiStore } from "@/store/ai-store";
 import { Plus, Share2Icon, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { DEFAULT_BASE_BY_PROVIDER } from "./SettingsPage";
 import ShareAISourceDialog from "@/components/settings/ShareAISourceDialog";
 import { toast } from "sonner";
 

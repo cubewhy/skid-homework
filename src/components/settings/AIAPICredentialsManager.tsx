@@ -8,10 +8,10 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { DEFAULT_BASE_BY_PROVIDER } from "./SettingsPage";
 import { useMemo, useState } from "react";
 import {
   AiSource,
+  DEFAULT_BASE_BY_PROVIDER,
   DEFAULT_OPENAI_BASE_URL,
   useAiStore,
 } from "@/store/ai-store";

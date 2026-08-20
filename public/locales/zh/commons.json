@@ -258,10 +258,45 @@
       "reconnect": "重新连接 ADB",
       "screenshot": "ADB 截图",
       "connecting": "连接中...",
+      "connected": "已连接到 {{serial}}。",
+      "paired": "配对成功。请再使用设备的连接地址执行连接。",
       "screenshot-busy": "采集中...",
-      "screenshot-hint": "通过 ADB（WebUSB）从已连接的安卓设备捕获屏幕截图",
+      "screenshot-hint": "通过 ADB 从已连接的安卓设备捕获屏幕截图",
       "menu-aria-label": "ADB 操作菜单",
-      "capture-timeout": "ADB 截图超时，请检查连接"
+      "capture-timeout": "ADB 截图超时，请检查连接",
+      "remote-dialog": {
+        "title": "远程 ADB 配对 / 连接",
+        "description": "使用本地 ADB server，直接选择已有设备，或通过 Android 无线调试完成配对与连接。",
+        "cancel": "取消",
+        "tabs": {
+          "devices": "设备",
+          "connect": "连接",
+          "pair": "配对"
+        },
+        "devices": {
+          "description": "直接选择本机 ADB server 中已经就绪的设备。",
+          "refresh": "刷新",
+          "loading": "正在加载设备...",
+          "empty": "未发现 ADB 设备。请先连接 USB 设备，或使用下方的配对 / 连接功能。",
+          "select": "使用此设备",
+          "selected": "已选择",
+          "selected-badge": "当前设备"
+        },
+        "connect": {
+          "description": "如果这台电脑已经与设备完成过配对，请直接使用连接地址。",
+          "address": "设备地址",
+          "placeholder": "192.168.1.23:5555",
+          "submit": "连接"
+        },
+        "pair": {
+          "description": "填写 Android 无线调试中显示的配对地址和配对码。配对完成后，请切换到“连接”标签继续连接。",
+          "pair-address": "配对地址",
+          "pair-address-placeholder": "192.168.1.23:37123",
+          "pairing-code": "配对码",
+          "pairing-code-placeholder": "123456",
+          "submit": "配对"
+        }
+      }
     },
     "toasts": {
       "adb-failed": "ADB 处理发生异常：{{error}}",
@@ -433,7 +468,6 @@
         "none": "未选择模型",
         "unknown": "未知模型（{{name}}）"
       },
-      "show-selector-in-scanner": "在扫描界面显示模型选择以快速切换模型",
       "refresh": "刷新模型列表",
       "manual": {
         "title": "自定义模型",
@@ -453,7 +487,8 @@
         "label": "当选择的模型不可用时，回落到",
         "desc": "当主模型请求失败时，自动切换到此模型重试",
         "none": "无"
-      }
+      },
+      "show-selector-in-scan-page": "在扫描页面显示模型选择以快速切换模型"
     },
     "thinking": {
       "title": "思考参数",
@@ -468,7 +503,7 @@
           "enabled": "已开启联网搜索"
         },
         "desc": "在需要时允许助手调用联网搜索工具。",
-        "show-toggle-in-scanner": "在扫描界面显示联网搜索按钮以快速切换"
+        "show-toggle-in-scan-page": "在扫描页面显示联网搜索按钮以快速切换"
       }
     },
     "traits": {
@@ -516,38 +551,85 @@
     "item-label": "题目 {{index}}"
   },
   "init-page": {
-    "tagline": "本地 • 私密 • 免费",
-    "headline": {
-      "highlight": "欢迎来到 SkidHomework",
-      "subtitle": "摆脱作业内卷。"
+    "welcome": {
+      "title": "欢迎来到 SkidHomework",
+      "tagline": "本地 · 私密 · 免费",
+      "description": "喜欢可汗学院式的自学，却常被堆积如山的作业拖住脚步？SkidHomework 本地运行，尊重你的隐私，让你把精力放在学习上。",
+      "features": {
+        "privacy": "无遥测、无数据收集",
+        "camera": "拍下作业，立刻获得逐步讲解",
+        "fast": "快速上手——配置即可开始"
+      }
     },
-    "intro": "喜欢可汗学院式的自学，却常被堆积如山的作业拖住脚步？SkidHomework 本地运行，尊重你的隐私，让你把精力放在学习上，而不是重复劳动。",
-    "features": {
-      "telemetry": "无遥测、无骚扰请求，只使用 Gemini API。",
-      "camera": "拍下作业，立刻获得逐步讲解。",
-      "setup": "快速上手——粘贴 Gemini API Key 就能开始。"
+    "ai-config": {
+      "title": "AI 服务",
+      "description": "配置一个或多个 AI 提供商。你可以跳过此步，稍后在设置中配置。",
+      "api-key-placeholder": "{{provider}} API 密钥",
+      "base-url-label": "自定义 API 基础地址",
+      "base-url-placeholder": "{{provider}} 的默认接口地址",
+      "base-url-helper": "留空将使用默认地址。",
+      "api-hint-gemini": "在 <link>Google AI Studio</link> 申请 API Key。",
+      "api-hint-openai": "在 <link>OpenAI 控制台</link> 申请 API Key。",
+      "storage-note": "密钥仅存储在本地，绝不会上传到服务器。",
+      "enabled": "已启用",
+      "status": {
+        "loading": "正在验证 API 密钥...",
+        "connected": "连接成功。",
+        "errors": {
+          "auth": "API 密钥无效或访问被拒绝。",
+          "rate-limit": "请求频率受限，请稍后重试。",
+          "network": "连接失败，请检查地址和网络。",
+          "unknown": "连接失败，请检查密钥和地址。"
+        }
+      }
     },
-    "form": {
-      "key-placeholder": "{{provider}} API 密钥",
-      "submit": "帮我省时间！",
-      "advanced": {
-        "title": "高级选项",
-        "base-url-label": "API 基础地址（可选）",
-        "base-url-placeholder": "{{provider}} 的默认接口地址",
-        "base-url-helper": "留空将使用 {{provider}} 的默认地址。"
+    "preferences": {
+      "title": "偏好设置",
+      "description": "自定义你的体验。所有设置都可以稍后在设置中更改。",
+      "theme": {
+        "label": "主题",
+        "system": "跟随系统",
+        "light": "浅色",
+        "dark": "深色"
       },
-      "api-hint": "在 <link>Google AI Studio</link> 申请 API Key。",
-      "storage-note": "我们使用加密浏览器存储在本地保存你的密钥，绝不会上传到服务器。",
-      "provider": {
-        "label": "AI 提供商"
+      "language": {
+        "label": "语言",
+        "en": "English",
+        "zh": "中文"
       },
-      "api-hint-openai": "在 <link>OpenAI 控制台</link> 申请 API Key。"
+      "model": {
+        "label": "AI 模型",
+        "loading": "加载模型中...",
+        "no-key": "请先输入 API 密钥以查看可用模型。"
+      }
     },
-    "preview": {
-      "title": "作业相机",
-      "ocr": "OCR",
-      "steps": "步骤",
-      "hints": "提示"
+    "advanced": {
+      "title": "高级设置",
+      "description": "微调你的体验。所有设置都可以稍后在设置中更改。",
+      "thinking-budget": {
+        "label": "思考预算",
+        "tip": "AI 推理的最大 Token 数（仅 Gemini）。",
+        "unit": "tokens"
+      },
+      "online-search": "在线搜索",
+      "online-search-tip": "允许 AI 搜索网络获取额外上下文。",
+      "max-retries": {
+        "label": "最大重试次数",
+        "tip": "API 调用失败时的最大自动重试次数（0-10）。"
+      },
+      "fallback": {
+        "label": "备用模型",
+        "tip": "主模型失败时自动切换到此模型。",
+        "none": "无",
+        "no-models": "请先配置 API 密钥以查看可用模型。"
+      }
+    },
+    "navigation": {
+      "back": "上一步",
+      "next": "下一步",
+      "skip": "跳过",
+      "finish": "开始使用",
+      "advanced": "高级设置"
     },
     "footer": {
       "notice": "基于 GPLv3 许可，由 cubewhy 创建。",
@@ -686,10 +768,7 @@
     "problem": "题目",
     "answer": "答案",
     "explanation": "解析",
-    "online-search": "联网搜索",
-    "copy": {
-      "success": "复制成功"
-    }
+    "online-search": "联网搜索"
   },
   "sources": {
     "upload": "本地上传",
@@ -701,6 +780,45 @@
       "requires-responses-api-online-search": "使用联网搜索功能需要开启 Responses API 设置",
       "requires-responses-api-pdf": "使用 PDF 识别功能需要开启 Responses API 设置",
       "web-search-not-supported": "模型 {{model}} 不支持联网搜索，已自动禁用该功能继续处理"
+    }
+  },
+  "web-init-page": {
+    "tagline": "本地 • 私密 • 免费",
+    "headline": {
+      "highlight": "欢迎来到 SkidHomework",
+      "subtitle": "摆脱作业内卷。"
+    },
+    "intro": "喜欢可汗学院式的自学，却常被堆积如山的作业拖住脚步？SkidHomework 本地运行，尊重你的隐私，让你把精力放在学习上，而不是重复劳动。",
+    "features": {
+      "telemetry": "无遥测、无骚扰请求，只使用 Gemini API。",
+      "camera": "拍下作业，立刻获得逐步讲解。",
+      "setup": "快速上手——粘贴 Gemini API Key 就能开始。"
+    },
+    "form": {
+      "key-placeholder": "{{provider}} API 密钥",
+      "submit": "帮我省时间！",
+      "advanced": {
+        "title": "高级选项",
+        "base-url-label": "API 基础地址（可选）",
+        "base-url-placeholder": "{{provider}} 的默认接口地址",
+        "base-url-helper": "留空将使用 {{provider}} 的默认地址。"
+      },
+      "api-hint": "在 <link>Google AI Studio</link> 申请 API Key。",
+      "storage-note": "我们使用加密浏览器存储在本地保存你的密钥，绝不会上传到服务器。",
+      "provider": {
+        "label": "AI 提供商"
+      },
+      "api-hint-openai": "在 <link>OpenAI 控制台</link> 申请 API Key。"
+    },
+    "preview": {
+      "title": "作业相机",
+      "ocr": "OCR",
+      "steps": "步骤",
+      "hints": "提示"
+    },
+    "footer": {
+      "notice": "基于 GPLv3 许可，由 cubewhy 创建。",
+      "source": "源代码"
     }
   }
 }
