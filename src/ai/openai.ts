@@ -20,10 +20,8 @@ export interface ResponseInputTextContent {
 
 export interface ResponseInputImageContent {
   type: "input_image";
-  image_url: {
-    url: string;
-    detail?: "auto" | "low" | "high";
-  };
+  image_url: string;
+  detail?: "auto" | "low" | "high";
 }
 
 export interface ResponseInputFileContent {
@@ -46,6 +44,12 @@ const DEFAULT_OPENAI_ROOT = "https://api.openai.com/v1";
 
 function normalizeBaseUrl(baseUrl?: string) {
   return (baseUrl ?? DEFAULT_OPENAI_ROOT).replace(/\/$/, "");
+}
+
+function toDataUrl(data: string, mimeType: string): string {
+  return data.startsWith("data:")
+    ? data
+    : `data:${mimeType};base64,${data}`;
 }
 
 export class OpenAiClient extends BaseAiClient {
@@ -208,15 +212,13 @@ export class OpenAiClient extends BaseAiClient {
     if (mimeType.startsWith("image/")) {
       contentParts.push({
         type: "input_image",
-        image_url: {
-          url: `data:${mimeType};base64,${media}`,
-        },
+        image_url: toDataUrl(media, mimeType),
       });
     } else {
       contentParts.push({
         type: "input_file",
         filename: name,
-        file_data: media,
+        file_data: toDataUrl(media, mimeType),
       });
     }
 
