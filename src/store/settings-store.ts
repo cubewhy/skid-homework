@@ -32,7 +32,7 @@ const DEFAULT_LANGUAGE: LanguagePreference = "en";
 
 export interface SettingsState {
   imageEnhancement: boolean;
-  setImageEnhancement: (imagePostprocessing: boolean) => void;
+  setImageEnhancement: (imageEnhancement: boolean) => void;
 
   theme: ThemePreference;
   setThemePreference: (theme: ThemePreference) => void;
@@ -60,11 +60,11 @@ export interface SettingsState {
   onlineSearchEnabled: boolean;
   setOnlineSearchEnabled: (state: boolean) => void;
 
-  showModelSelectorInScanner: boolean;
-  setShowModelSelectorInScanner: (state: boolean) => void;
+  showModelSelectorInScanPage: boolean;
+  setShowModelSelectorInScanPage: (state: boolean) => void;
 
-  showOnlineSearchInScanner: boolean;
-  setShowOnlineSearchInScanner: (state: boolean) => void;
+  showOnlineSearchInScanPage: boolean;
+  setShowOnlineSearchInScanPage: (state: boolean) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -80,10 +80,10 @@ export const useSettingsStore = create<SettingsState>()(
       devtoolsEnabled: false,
       clearDialogOnSubmit: true,
       onlineSearchEnabled: false,
-      showModelSelectorInScanner: false,
-      showOnlineSearchInScanner: false,
+      showModelSelectorInScanPage: false,
+      showOnlineSearchInScanPage: false,
 
-      setImageEnhancement: (state) => set({ imageEnhancement: state }),
+      setImageEnhancement: (imageEnhancement) => set({ imageEnhancement }),
       setThemePreference: (theme) => set({ theme }),
       setLanguage: (language) =>
         set({
@@ -116,10 +116,10 @@ export const useSettingsStore = create<SettingsState>()(
       setDevtoolsState: (state) => set({ devtoolsEnabled: state }),
       setClearDialogOnSubmit: (state) => set({ clearDialogOnSubmit: state }),
       setOnlineSearchEnabled: (state) => set({ onlineSearchEnabled: state }),
-      setShowModelSelectorInScanner: (state) =>
-        set({ showModelSelectorInScanner: state }),
-      setShowOnlineSearchInScanner: (state) =>
-        set({ showOnlineSearchInScanner: state }),
+      setShowModelSelectorInScanPage: (state) =>
+        set({ showModelSelectorInScanPage: state }),
+      setShowOnlineSearchInScanPage: (state) =>
+        set({ showOnlineSearchInScanPage: state }),
     }),
     {
       name: "skidhw-storage",
@@ -135,10 +135,10 @@ export const useSettingsStore = create<SettingsState>()(
         devtoolsEnabled: state.devtoolsEnabled,
         clearDialogOnSubmit: state.clearDialogOnSubmit,
         onlineSearchEnabled: state.onlineSearchEnabled,
-        showModelSelectorInScanner: state.showModelSelectorInScanner,
-        showOnlineSearchInScanner: state.showOnlineSearchInScanner,
+        showModelSelectorInScanPage: state.showModelSelectorInScanPage,
+        showOnlineSearchInScanPage: state.showOnlineSearchInScanPage,
       }),
-      version: 8,
+      version: 10,
       migrate: (persistedState, version) => {
         const data: Partial<SettingsState> & Record<string, unknown> =
           persistedState && typeof persistedState === "object"
@@ -151,6 +151,12 @@ export const useSettingsStore = create<SettingsState>()(
 
         const existing = (data as { keybindings?: ShortcutMap }).keybindings;
         const legacyDevtools = (data as { devtools?: boolean }).devtools;
+        const legacyShowModelSelectorInScanner = (
+          data as { showModelSelectorInScanner?: boolean }
+        ).showModelSelectorInScanner;
+        const legacyShowOnlineSearchInScanner = (
+          data as { showOnlineSearchInScanner?: boolean }
+        ).showOnlineSearchInScanner;
 
         const migratedData = {
           ...data,
@@ -166,12 +172,19 @@ export const useSettingsStore = create<SettingsState>()(
           onlineSearchEnabled:
             (data as { onlineSearchEnabled?: boolean }).onlineSearchEnabled ??
             false,
-          showModelSelectorInScanner:
-            (data as { showModelSelectorInScanner?: boolean })
-              .showModelSelectorInScanner ?? false,
-          showOnlineSearchInScanner:
-            (data as { showOnlineSearchInScanner?: boolean })
-              .showOnlineSearchInScanner ?? false,
+          imageEnhancement:
+            (data as { imageEnhancement?: boolean }).imageEnhancement ??
+            false,
+          showModelSelectorInScanPage:
+            (data as { showModelSelectorInScanPage?: boolean })
+              .showModelSelectorInScanPage ??
+            legacyShowModelSelectorInScanner ??
+            false,
+          showOnlineSearchInScanPage:
+            (data as { showOnlineSearchInScanPage?: boolean })
+              .showOnlineSearchInScanPage ??
+            legacyShowOnlineSearchInScanner ??
+            false,
           devtoolsEnabled:
             (data as { devtoolsEnabled?: boolean }).devtoolsEnabled ??
             legacyDevtools ??
@@ -179,6 +192,10 @@ export const useSettingsStore = create<SettingsState>()(
         };
 
         delete (migratedData as Record<string, unknown>).devtools;
+        delete (migratedData as Record<string, unknown>)
+          .showModelSelectorInScanner;
+        delete (migratedData as Record<string, unknown>)
+          .showOnlineSearchInScanner;
         return migratedData;
       },
     },

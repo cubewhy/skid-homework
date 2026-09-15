@@ -242,6 +242,9 @@ export const useProblemsStore = create<ProblemsState>()(
         // Map FileItem updates to HomeworkRecord updates where applicable
         const dbUpdates: Partial<HomeworkRecord> = {};
         if (updates.status) dbUpdates.status = updates.status;
+        if (updates.file) dbUpdates.blob = updates.file;
+        if (updates.displayName) dbUpdates.fileName = updates.displayName;
+        if (updates.mimeType) dbUpdates.mimeType = updates.mimeType;
 
         if (Object.keys(dbUpdates).length > 0) {
           db.homeworks.update(id, dbUpdates).catch(console.error);

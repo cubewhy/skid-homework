@@ -26,11 +26,13 @@
     ],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@/platform": ["./src/platform/index.ts"]
     }
   },
   "include": [
     "./src",
+    "./src-tauri/frontend",
     "./dist/types/**/*.ts",
     "./next-env.d.ts",
     "dist/types/**/*.ts",

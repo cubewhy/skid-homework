@@ -15,13 +15,11 @@ export default function RequireAiKey({
   const router = useRouter();
   const pathname = usePathname();
 
-  // Initialize hydration state to false to prevent SSR mismatch.
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     const isHydrated = useAiStore.persist?.hasHydrated?.() ?? false;
     if (isHydrated) {
-      // Use queueMicrotask in useEffect to safely update the hydration state
       queueMicrotask(() => {
         setHydrated(true);
       });

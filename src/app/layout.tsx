@@ -1,7 +1,7 @@
 import "../index.css";
 import type {Metadata, Viewport} from "next";
 import Providers from "./providers";
-import {SerwistProvider} from "./serwist";
+import {PlatformRootShell} from "@/platform";
 
 import "@/css/jsxgraph.css";
 
@@ -50,13 +50,9 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body suppressHydrationWarning>
-        <SerwistProvider
-          swUrl="/sw.js"
-          disable={process.env.NODE_ENV !== "production"}
-          options={{ updateViaCache: "none" }}
-        >
+        <PlatformRootShell>
           <Providers>{children}</Providers>
-        </SerwistProvider>
+        </PlatformRootShell>
       </body>
     </html>
   );

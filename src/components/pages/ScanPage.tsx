@@ -1,37 +1,34 @@
 "use client";
-import { toast } from "sonner";
-import { v4 as uuidv4 } from "uuid";
-import { Info, StarIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useAiStore } from "@/store/ai-store";
+import {toast} from "sonner";
+import {v4 as uuidv4} from "uuid";
+import {Info, StarIcon} from "lucide-react";
+import {useCallback, useEffect, useMemo, useState} from "react";
+import {useAiStore} from "@/store/ai-store";
 import ActionsCard from "../actions/ActionsCard";
 import PreviewCard from "../preview/PreviewCard";
 
 import solvePrompt from "@/ai/prompts/solve.prompt.md";
 
-import { uint8ToBase64 } from "@/utils/encoding";
-import { parseSolveResponse } from "@/ai/response";
+import {uint8ToBase64} from "@/utils/encoding";
+import {parseSolveResponse} from "@/ai/response";
 
-import {
-  type FileItem,
-  type ProblemSolution,
-  useProblemsStore
-} from "@/store/problems-store";
+import {type FileItem, type ProblemSolution, useProblemsStore} from "@/store/problems-store";
 import SolutionsArea from "../solutions/SolutionsArea";
-import { useSettingsStore } from "@/store/settings-store";
-import { processImage } from "@/utils/image-post-processing";
-import { Button } from "../ui/button";
-import { useTranslation } from "react-i18next";
-import { useMediaQuery } from "@/hooks/use-media-query";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { cn } from "@/lib/utils";
-import { useRouter } from "next/navigation";
-import { useShortcut } from "@/hooks/use-shortcut";
-import OpenCVLoader from "../OpenCVLoader";
-import { getEnabledToolCallingPrompts } from "@/ai/prompts/prompt-manager";
-import { useStoreInitialization } from "@/hooks/use-store-initialization";
-import { isTextMimeType } from "@/utils/file-utils";
-import { isNonRetryableError } from "@/ai/errors";
+import {useSettingsStore} from "@/store/settings-store";
+import {ImagePostProcessLoader, processImage} from "@/platform";
+
+import {Button} from "../ui/button";
+import {useTranslation} from "react-i18next";
+import {useMediaQuery} from "@/hooks/use-media-query";
+import {Tabs, TabsContent, TabsList, TabsTrigger} from "../ui/tabs";
+import {cn} from "@/lib/utils";
+import {useRouter} from "next/navigation";
+import {useShortcut} from "@/hooks/use-shortcut";
+
+import {getEnabledToolCallingPrompts} from "@/ai/prompts/prompt-manager";
+import {useStoreInitialization} from "@/hooks/use-store-initialization";
+import {isTextMimeType} from "@/utils/file-utils";
+import {isNonRetryableError} from "@/ai/errors";
 
 export default function ScanPage() {
   const { t } = useTranslation("commons", { keyPrefix: "scan-page" });
@@ -169,36 +166,38 @@ export default function ScanPage() {
         status:
           file.type.startsWith("image/") && imageEnhancement
             ? "processing"
-            : "pending"
+            : "pending",
       }));
 
       addFileItems(initialItems);
 
-      // Image post-processing
       if (imageEnhancement) {
         initialItems.forEach((item) => {
-          if (item.status === "processing") {
-            console.log(`Processing image ${item.displayName}`);
-            processImage(item.file)
-              .then((result) => {
-                console.log(`Success processed image ${item.displayName}`);
-                updateFileItem(item.id, {
-                  status: "pending",
-                  file: result.file,
-                  url: result.url
-                });
-              })
-              .catch((error) => {
-                console.error(`Failed to process ${item.displayName}:`, error);
-                updateFileItem(item.id, {
-                  status: "failed"
-                });
-              });
+          if (item.status !== "processing") {
+            return;
           }
+
+          void processImage(item.file)
+            .then((result) => {
+              URL.revokeObjectURL(item.url);
+              updateFileItem(item.id, {
+                status: "pending",
+                file: result.file,
+                displayName: result.file.name,
+                mimeType: result.file.type,
+                url: result.url,
+              });
+            })
+            .catch((error) => {
+              console.error(`Failed to enhance ${item.displayName}:`, error);
+              updateFileItem(item.id, {
+                status: "failed",
+              });
+            });
         });
       }
     },
-    [addFileItems, imageEnhancement, allowPdfUploads, t, updateFileItem]
+    [addFileItems, allowPdfUploads, imageEnhancement, t, updateFileItem]
   );
 
   // Function to remove a specific item from the list by its ID.
@@ -502,12 +501,12 @@ ${traits}
               steps: []
             };
 
-            updateSolution(itemsToProcess[i].url, {
+            updateSolution(itemsToProcess[i].id, {
               status: "failed",
               problems: [failureProblem],
               aiSourceId: undefined
             });
-            clearStreamedOutput(itemsToProcess[i].url);
+            clearStreamedOutput(itemsToProcess[i].id);
 
             updateItemStatus(itemsToProcess[i].id, "failed");
           }
@@ -545,7 +544,8 @@ ${traits}
 
   return (
     <>
-      {imageEnhancement && <OpenCVLoader />}
+      {imageEnhancement && <ImagePostProcessLoader />}
+
 
       <div className={cn("min-h-screen", isMobile && "pb-24")}>
         <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">

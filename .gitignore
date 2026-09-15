@@ -11,13 +11,27 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
-/.open-next
-/.wrangler
-/.next
-dist-ssr
 *.local
 /next-env.d.ts
+
+# build/output/cache directories
+/build/
+/dist/
+/dist-ssr/
+/out/
+/output/
+/outputs/
+/release/
+/release-assets/
+/.next/
+/.open-next/
+/.wrangler/
+/.turbo/
+/.cache/
+/.tmp/
+/tmp/
+/temp/
+/coverage/
 *.tsbuildinfo
 
 # Editor directories and files
@@ -47,3 +61,22 @@ qodana.yaml
 # serwist
 public/sw.js
 public/sw.js.map
+
+# Tauri / Rust / Android generated outputs
+src-tauri/target/
+src-tauri/gen/
+src-tauri/.tmp/
+src-tauri/validation-run/
+
+# local AI Agent Settings
+.claude/
+.agents/
+.codex/
+.trellis/
+agents.md
+claude.md
+
+# local environment
+.env
+.env.local
+keystore.properties

@@ -1,0 +1,525 @@
+name: Tauri Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: Select how to bump the semantic version
+        required: true
+        default: patch
+        type: choice
+        options:
+          - major
+          - minor
+          - patch
+      prerelease:
+        description: Mark the GitHub Release as a prerelease
+        required: false
+        default: false
+        type: boolean
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tauri-release
+  cancel-in-progress: false
+
+env:
+  PNPM_VERSION: 10.27.0
+  NODE_VERSION: 24
+  ANDROID_API_LEVEL: "36"
+  ANDROID_BUILD_TOOLS: "36.0.0"
+  ANDROID_NDK_VERSION: "29.0.14206865"
+
+jobs:
+  plan-release:
+    if: github.event_name == 'workflow_dispatch' || github.event.deleted == false
+    name: Plan releases
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      has_operations: ${{ steps.plan.outputs.has_operations }}
+      operations: ${{ steps.plan.outputs.operations }}
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Plan releases
+        id: plan
+        shell: bash
+        env:
+          AFTER_SHA: ${{ github.event.after }}
+          BEFORE_SHA: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+          PRERELEASE: ${{ inputs.prerelease }}
+          RELEASE_TYPE: ${{ inputs.release_type }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          zero_sha="0000000000000000000000000000000000000000"
+          marker_pattern='\[(pre-release|release) (major|minor|patch)\][[:space:]]*$'
+
+          validate_sha() {
+            local name="$1"
+            local sha="$2"
+            if [[ ! "$sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
+              echo "$name must be a 40-character commit SHA." >&2
+              exit 1
+            fi
+            git cat-file -e "${sha}^{commit}"
+          }
+
+          bump_version() {
+            local version="$1"
+            local release_type="$2"
+            local major minor patch
+            IFS=. read -r major minor patch <<< "$version"
+            case "$release_type" in
+              major) printf '%s.0.0\n' "$((major + 1))" ;;
+              minor) printf '%s.%s.0\n' "$major" "$((minor + 1))" ;;
+              patch) printf '%s.%s.%s\n' "$major" "$minor" "$((patch + 1))" ;;
+              *) echo "Unsupported release type: $release_type" >&2; exit 1 ;;
+            esac
+          }
+
+          raw_operations='[]'
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            validate_sha TARGET_SHA "$TARGET_SHA"
+            raw_operations="$(
+              jq -cn \
+                --arg targetSha "${TARGET_SHA,,}" \
+                --arg releaseType "$RELEASE_TYPE" \
+                --argjson prerelease "$PRERELEASE" \
+                '[{$targetSha,$releaseType,$prerelease}]'
+            )"
+          else
+            if [[ ! "$BEFORE_SHA" =~ ^[0-9a-fA-F]{40}$ ]] || [[ ! "$AFTER_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+              echo "Push boundaries must be 40-character commit SHAs." >&2
+              exit 1
+            fi
+            commits=()
+            if [ "$AFTER_SHA" != "$zero_sha" ]; then
+              validate_sha AFTER_SHA "$AFTER_SHA"
+              if [ "$BEFORE_SHA" = "$zero_sha" ]; then
+                mapfile -t commits < <(git rev-list --reverse "$AFTER_SHA")
+              else
+                validate_sha BEFORE_SHA "$BEFORE_SHA"
+                mapfile -t commits < <(git rev-list --reverse "${BEFORE_SHA}..${AFTER_SHA}")
+              fi
+            fi
+
+            for sha in "${commits[@]}"; do
+              message="$(git log -1 --pretty=%B "$sha")"
+              if [[ ! "$message" =~ $marker_pattern ]]; then
+                continue
+              fi
+              marker_kind="${BASH_REMATCH[1]}"
+              release_type="${BASH_REMATCH[2]}"
+              prerelease=false
+              if [ "$marker_kind" = "pre-release" ]; then
+                prerelease=true
+              fi
+              raw_operations="$(
+                jq -c \
+                  --arg targetSha "${sha,,}" \
+                  --arg releaseType "$release_type" \
+                  --argjson prerelease "$prerelease" \
+                  '. + [{$targetSha,$releaseType,$prerelease}]' \
+                  <<< "$raw_operations"
+              )"
+            done
+          fi
+
+          operation_count="$(jq 'length' <<< "$raw_operations")"
+          latest_tag="$(
+            git tag --list 'v[0-9]*.[0-9]*.[0-9]*' \
+              | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+              | sort -V \
+              | tail -n 1 \
+              || true
+          )"
+          if [ -n "$latest_tag" ]; then
+            current_version="${latest_tag#v}"
+          else
+            current_version="$(jq -er '.version' src-tauri/tauri.conf.json)"
+            if [[ ! "$current_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "Tauri source version is not stable semantic versioning: $current_version" >&2
+              exit 1
+            fi
+          fi
+
+          operations='[]'
+          operation_index=0
+          while IFS= read -r operation; do
+            operation_index=$((operation_index + 1))
+            release_type="$(jq -r '.releaseType' <<< "$operation")"
+            if [ -n "$latest_tag" ] || [ "$operation_index" -gt 1 ]; then
+              current_version="$(bump_version "$current_version" "$release_type")"
+            fi
+            tag="v${current_version}"
+
+            operation="$(
+              jq -c \
+                --arg version "$current_version" \
+                --arg tag "$tag" \
+                '. + {$version,$tag}' \
+                <<< "$operation"
+            )"
+            operations="$(jq -c --argjson operation "$operation" '. + [$operation]' <<< "$operations")"
+          done < <(jq -c '.[]' <<< "$raw_operations")
+
+          {
+            if [ "$operation_count" -gt 0 ]; then
+              echo "has_operations=true"
+            else
+              echo "has_operations=false"
+              echo "No release or pre-release commits were found in this push." >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo "operations=$operations"
+          } >> "$GITHUB_OUTPUT"
+
+
+  build-desktop:
+    needs: plan-release
+    if: needs.plan-release.outputs.has_operations == 'true'
+    name: Build ${{ matrix.operation.tag }} / ${{ matrix.platform.id }}
+    runs-on: ${{ matrix.platform.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        operation: ${{ fromJSON(needs.plan-release.outputs.operations) }}
+        platform:
+          - id: windows
+            runner: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+          - id: linux
+            runner: ubuntu-22.04
+            rust_target: x86_64-unknown-linux-gnu
+          - id: macos-x64
+            runner: macos-15-intel
+            rust_target: x86_64-apple-darwin
+          - id: macos-aarch64
+            runner: macos-15
+            rust_target: aarch64-apple-darwin
+
+    steps:
+      - name: Check out release target
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.operation.targetSha }}
+          path: source
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: source/pnpm-lock.yaml
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform.rust_target }}
+
+      - name: Set up Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: source/src-tauri -> target
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf pkg-config
+
+      - name: Install macOS system dependencies
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install pkgconf
+
+      - name: Install dependencies
+        working-directory: source
+        run: pnpm install --frozen-lockfile
+
+      - name: Build desktop bundles
+        shell: bash
+        working-directory: source
+        env:
+          RUST_TARGET: ${{ matrix.platform.rust_target }}
+          VERSION_NAME: ${{ matrix.operation.version }}
+        run: |
+          set -euo pipefail
+          release_config="$(printf '{"version":"%s"}' "$VERSION_NAME")"
+          pnpm tauri build --ci --no-sign --config "$release_config" --target "$RUST_TARGET"
+
+      - name: Collect desktop artifacts
+        shell: bash
+        env:
+          CELL_DIR: ${{ runner.temp }}/tauri-build-${{ matrix.operation.tag }}-${{ matrix.platform.id }}
+          PLATFORM_ID: ${{ matrix.platform.id }}
+          RUST_TARGET: ${{ matrix.platform.rust_target }}
+        run: |
+          set -euo pipefail
+          search_root="source/src-tauri/target/${RUST_TARGET}/release/bundle"
+          output_dir="$CELL_DIR/assets"
+          if [ ! -d "$search_root" ]; then
+            echo "Missing artifact directory: $search_root" >&2
+            exit 1
+          fi
+          mkdir -p "$output_dir"
+          while IFS= read -r -d '' source_path; do
+            destination="$output_dir/${PLATFORM_ID}__$(basename "$source_path")"
+            if [ -e "$destination" ]; then
+              echo "Artifact name collision: $(basename "$destination")" >&2
+              exit 1
+            fi
+            cp "$source_path" "$destination"
+          done < <(
+            find "$search_root" -type f \
+              \( -iname '*.msi' -o -iname '*.exe' -o -iname '*.deb' -o -iname '*.rpm' \
+                 -o -iname '*.dmg' -o -iname '*.pkg' -o -iname '*.appimage' \
+                 -o -iname '*.app.tar.gz' \) \
+              ! -iname '*.sig' ! -iname '*updater*' -print0
+          )
+          if ! find "$output_dir" -type f -print -quit | grep -q .; then
+            echo "No release artifacts found for $PLATFORM_ID." >&2
+            exit 1
+          fi
+
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-build-${{ matrix.operation.tag }}-${{ matrix.platform.id }}
+          path: ${{ runner.temp }}/tauri-build-${{ matrix.operation.tag }}-${{ matrix.platform.id }}/assets
+          if-no-files-found: error
+  build-android:
+    needs: plan-release
+    if: needs.plan-release.outputs.has_operations == 'true'
+    name: Build ${{ matrix.operation.tag }} / android
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        operation: ${{ fromJSON(needs.plan-release.outputs.operations) }}
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+    steps:
+      - name: Check out workflow revision
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check out release target
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.operation.targetSha }}
+          path: source
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: source/pnpm-lock.yaml
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Set up Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: source/src-tauri -> target
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager "platforms;android-${ANDROID_API_LEVEL}" "build-tools;${ANDROID_BUILD_TOOLS}" "ndk;${ANDROID_NDK_VERSION}"
+          selected_ndk="$(find "${ANDROID_HOME}/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          if [ -z "${selected_ndk:-}" ] || [ ! -d "$selected_ndk" ]; then
+            echo "Unable to resolve an installed Android NDK under ${ANDROID_HOME}/ndk" >&2
+            exit 1
+          fi
+          echo "NDK_HOME=${selected_ndk}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=${selected_ndk}" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        working-directory: source
+        run: pnpm install --frozen-lockfile
+
+      - name: Initialize Android target
+        working-directory: source
+        run: pnpm tauri android init --ci --skip-targets-install
+
+      - name: Prepare Android signing files
+        if: env.ANDROID_KEYSTORE_BASE64 != '' && env.ANDROID_KEYSTORE_PASSWORD != '' && env.ANDROID_KEY_ALIAS != '' && env.ANDROID_KEY_PASSWORD != ''
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          android_root="src-tauri/gen/android"
+          keystore_path="${RUNNER_TEMP}/keystore.jks"
+          base64 --decode <<< "$ANDROID_KEYSTORE_BASE64" > "$keystore_path"
+          {
+            echo "keyAlias=${ANDROID_KEY_ALIAS}"
+            echo "keyPassword=${ANDROID_KEY_PASSWORD}"
+            echo "storeFile=${keystore_path}"
+            echo "storePassword=${ANDROID_KEYSTORE_PASSWORD}"
+          } > "${android_root}/keystore.properties"
+          python3 ../.github/scripts/configure_android_signing.py \
+            --build-gradle "${android_root}/app/build.gradle.kts"
+
+      - name: Build Android bundles
+        shell: bash
+        working-directory: source
+        env:
+          VERSION_NAME: ${{ matrix.operation.version }}
+        run: |
+          set -euo pipefail
+          release_config="$(printf '{"version":"%s"}' "$VERSION_NAME")"
+          pnpm tauri android build --apk --aab --ci --config "$release_config"
+
+      - name: Collect Android artifacts
+        shell: bash
+        env:
+          CELL_DIR: ${{ runner.temp }}/tauri-build-${{ matrix.operation.tag }}-android
+        run: |
+          set -euo pipefail
+          outputs_root="source/src-tauri/gen/android/app/build/outputs"
+          output_dir="$CELL_DIR/assets"
+          search_roots=()
+          [ -d "$outputs_root/apk" ] && search_roots+=("$outputs_root/apk")
+          [ -d "$outputs_root/bundle" ] && search_roots+=("$outputs_root/bundle")
+          if [ "${#search_roots[@]}" -eq 0 ]; then
+            echo "Missing Android artifact directories under $outputs_root." >&2
+            exit 1
+          fi
+          mkdir -p "$output_dir"
+          while IFS= read -r -d '' source_path; do
+            destination="$output_dir/android__$(basename "$source_path")"
+            if [ -e "$destination" ]; then
+              echo "Artifact name collision: $(basename "$destination")" >&2
+              exit 1
+            fi
+            cp "$source_path" "$destination"
+          done < <(
+            find "${search_roots[@]}" -type f -ipath '*release*' \
+              \( -iname '*.apk' -o -iname '*.aab' \) \
+              ! -iname '*baselineprofiles*' ! -iname '*updater*' -print0
+          )
+          if ! find "$output_dir" -maxdepth 1 -type f -iname '*.apk' -print -quit | grep -q .; then
+            echo "Missing Android APK artifact." >&2
+            exit 1
+          fi
+          if ! find "$output_dir" -maxdepth 1 -type f -iname '*.aab' -print -quit | grep -q .; then
+            echo "Missing Android App Bundle artifact." >&2
+            exit 1
+          fi
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-build-${{ matrix.operation.tag }}-android
+          path: ${{ runner.temp }}/tauri-build-${{ matrix.operation.tag }}-android/assets
+          if-no-files-found: error
+  publish-release:
+    needs:
+      - plan-release
+      - build-desktop
+      - build-android
+    if: always() && needs.plan-release.result == 'success' && needs.plan-release.outputs.has_operations == 'true'
+    name: Publish ${{ matrix.operation.tag }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        operation: ${{ fromJSON(needs.plan-release.outputs.operations) }}
+
+    steps:
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: tauri-build-${{ matrix.operation.tag }}-windows
+          path: release-assets
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: tauri-build-${{ matrix.operation.tag }}-linux
+          path: release-assets
+
+      - name: Download macOS Intel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: tauri-build-${{ matrix.operation.tag }}-macos-x64
+          path: release-assets
+
+      - name: Download macOS Apple Silicon artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: tauri-build-${{ matrix.operation.tag }}-macos-aarch64
+          path: release-assets
+
+      - name: Download Android artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: tauri-build-${{ matrix.operation.tag }}-android
+          path: release-assets
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ matrix.operation.tag }}
+          target_commitish: ${{ matrix.operation.targetSha }}
+          name: Skid Homework ${{ matrix.operation.tag }}
+          prerelease: ${{ matrix.operation.prerelease }}
+          generate_release_notes: true
+          files: release-assets/*
+          fail_on_unmatched_files: true
+          token: ${{ secrets.WORKFLOW_GIT_TOKEN || github.token }}
